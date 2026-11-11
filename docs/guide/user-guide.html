@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swarf User Guide</title>
+<style>
+  @page { size: A4; margin: 16mm 16mm 18mm 16mm; @bottom-center { content: counter(page); font: 8.5pt -apple-system, sans-serif; color: #8a92a3; } }
+  @page :first { @bottom-center { content: none; } }
+  :root { --ink: #1d2230; --muted: #5b6475; --accent: #b8741a; --rule: #d9dde5; --warn-bg: #fff5e6; --warn: #9a5b00; --code-bg: #f3f4f7; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font: 10.5pt/1.5 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: var(--ink); margin: 0; }
+  h1, h2, h3 { font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif; line-height: 1.2; }
+  h2 { font-size: 18pt; margin: 0 0 8pt; padding-top: 4pt; border-bottom: 2px solid var(--accent); padding-bottom: 4pt; break-after: avoid; }
+  h3 { font-size: 12.5pt; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code, kbd { font: 9pt "SF Mono", Menlo, monospace; background: var(--code-bg); border-radius: 3px; padding: 0 3px; }
+  pre { font: 8.8pt/1.45 "SF Mono", Menlo, monospace; background: var(--code-bg); border-radius: 6px; padding: 8pt 10pt; white-space: pre-wrap; break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 10pt; font-size: 9.6pt; break-inside: auto; }
+  th, td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: 1px solid var(--rule); }
+  th { background: #f0f2f6; font-weight: 600; }
+  tr { break-inside: avoid; }
+  figure { margin: 8pt 0 12pt; break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid var(--rule); border-radius: 6px; display: block; }
+  figure.narrow img { width: 46%; margin: 0 auto; }
+  figure.w85 img { width: 85%; margin: 0 auto; }
+  figure.w80 img { width: 80%; margin: 0 auto; }
+  .compact { font-size: 9.8pt; } .compact table { font-size: 9pt; } .compact th, .compact td { padding: 3pt 6pt; } .compact pre { font-size: 8.4pt; }
+  figcaption { color: var(--muted); font-size: 9pt; margin-top: 4pt; text-align: center; }
+  .chapter { break-before: page; }
+  .warn { background: var(--warn-bg); border-left: 4px solid var(--accent); padding: 8pt 10pt; border-radius: 4px; margin: 8pt 0 12pt; break-inside: avoid; }
+  .warn strong { color: var(--warn); }
+  .tip { background: #eef5ff; border-left: 4px solid #3d7bd9; padding: 7pt 10pt; border-radius: 4px; margin: 8pt 0 12pt; break-inside: avoid; }
+  .cover { height: 245mm; display: flex; flex-direction: column; justify-content: center; text-align: center; }
+  .cover h1 { font-size: 40pt; margin: 0; letter-spacing: -0.5pt; }
+  .cover .sub { font-size: 15pt; color: var(--muted); margin: 6pt 0 26pt; }
+  .cover img { width: 100%; border-radius: 8px; border: 1px solid var(--rule); }
+  .cover .meta { color: var(--muted); font-size: 9.5pt; margin-top: 18pt; }
+  .toc ol { list-style: none; padding: 0; columns: 2; column-gap: 24pt; }
+  .toc li { padding: 3pt 0; border-bottom: 1px dotted var(--rule); break-inside: avoid; }
+  .toc span { color: var(--accent); font-weight: 600; display: inline-block; width: 20pt; }
+  .steps { counter-reset: s; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 26pt; margin-bottom: 6pt; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 18pt; height: 18pt; border-radius: 50%; background: var(--accent); color: white; font-weight: 700; font-size: 9pt; text-align: center; line-height: 18pt; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <h1>Swarf</h1>
+  <div class="sub">User Guide · Mac-native CAM for hobby CNC</div>
+  <img src="../screenshot-simulation.png" alt="Swarf simulating a carved guitar body">
+  <div class="meta">Free and open source under the MIT License · github.com/mouldiwarp/swarf</div>
+</section>
+
+<section class="chapter toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><span>1</span>Before you start</li>
+    <li><span>2</span>Installing Swarf</li>
+    <li><span>3</span>The Swarf window</li>
+    <li><span>4</span>Importing and orienting a model</li>
+    <li><span>5</span>Stock, material and work zero</li>
+    <li><span>6</span>Choosing your machine</li>
+    <li><span>7</span>The tool library</li>
+    <li><span>8</span>Operations</li>
+    <li><span>9</span>Cutouts, finishing passes and tabs</li>
+    <li><span>10</span>Peck drilling</li>
+    <li><span>11</span>V-carving</li>
+    <li><span>12</span>Keep-out regions</li>
+    <li><span>13</span>Simulation and checks</li>
+    <li><span>14</span>Exporting G-code</li>
+    <li><span>15</span>Running the job on a WorkBee</li>
+    <li><span>16</span>Troubleshooting</li>
+    <li><span>17</span>Command line</li>
+    <li><span>18</span>Keyboard shortcuts</li>
+  </ol>
+
+  <h2 style="margin-top:18pt">1 · Before you start</h2>
+  <div class="warn">
+    <p><strong>Swarf is experimental software. You use it, and any G-code it produces, at your own discretion and risk.</strong></p>
+    <p style="margin:0">It is provided under the MIT License without warranty of any kind. The authors accept no liability for damage to
+    machines, tools or materials, or for injury.</p>
+  </div>
+  <p>Every time Swarf starts, it shows this notice and asks you to click <b>I Understand</b>. Clicking <b>Quit</b> closes the app.
+    Make these habits part of every job:</p>
+  <ul>
+    <li><b>Check every toolpath</b> in the 3D view and the simulator before you export.</li>
+    <li><b>Air-cut first</b>, with Z zeroed well above the stock, and watch the whole job.</li>
+    <li><b>Test new jobs on inexpensive material</b> such as MDF, pine or scrap before you cut good stock.</li>
+    <li><b>Measure your bits</b> and correct the tool library. Wrong diameters or flute lengths give wrong toolpaths.</li>
+    <li><b>Never leave a running machine unattended.</b> Wear eye and hearing protection and keep your hands clear.</li>
+  </ul>
+</section>
+
+<section class="chapter">
+  <figure class="narrow"><img src="../screenshot-disclaimer.png" alt="Launch disclaimer"><figcaption>The notice shown at every launch.</figcaption></figure>
+  <h2 style="margin-top:16pt">2 · Installing Swarf</h2>
+  <p>Swarf runs on <b>macOS 15 or later</b> and builds from source with Xcode 16 or later. Install Xcode (or its command line tools),
+    then in Terminal:</p>
+<pre>git clone https://github.com/mouldiwarp/swarf.git
+cd swarf
+scripts/build-app.sh          # builds build/Swarf.app
+open build/Swarf.app</pre>
+  <p>You can copy <code>build/Swarf.app</code> to your Applications folder. To update later, run <code>git pull</code> and
+    <code>scripts/build-app.sh</code> again.</p>
+
+</section>
+
+<section class="chapter">
+  <h2>3 · The Swarf window</h2>
+  <figure><img src="../screenshot-toolpaths.png" alt="Swarf main window"><figcaption>A guitar body with pocket and cutout toolpaths.</figcaption></figure>
+  <table>
+    <tr><th style="width:26%">Area</th><th>What it does</th></tr>
+    <tr><td><b>Sidebar</b> (left)</td><td><b>Setup</b> (Model &amp; Orientation, Stock &amp; Work Zero, Machine &amp; Output), <b>Regions</b> (keep-out boxes) and the <b>Operations</b> list. Tick or untick an operation to turn it on or off. Right-click to duplicate or delete.</td></tr>
+    <tr><td><b>Viewport</b> (centre)</td><td>The 3D view of the model, the stock and the toolpaths. Use <b>Iso / Top / Front / Right</b> for preset views and the eye menu to show or hide layers. The tool strip down the left side switches between orbit, pick face up, pick face down, draw keep-out and place tabs.</td></tr>
+    <tr><td><b>Inspector</b> (right)</td><td>The settings for whatever is selected in the sidebar.</td></tr>
+    <tr><td><b>Toolbar</b></td><td>Import STL, Generate (recalculate the toolpaths), Simulate, Export G-code, and show or hide the inspector.</td></tr>
+    <tr><td><b>Status bar</b></td><td>Model size, triangle count, a mesh health warning, and the total estimated run time.</td></tr>
+  </table>
+  <p><b>Navigating the 3D view:</b> drag to orbit, scroll or pinch to zoom, and drag with ⇧ or ⌥ held (or right-drag) to pan.</p>
+</section>
+
+<section class="chapter">
+  <h2>4 · Importing and orienting a model</h2>
+  <ol class="steps">
+    <li>Choose <b>File ▸ Import STL…</b> (⇧⌘I), click <b>Import STL</b> in the toolbar, or drop an STL on the window. Binary and ASCII STL both work. Swarf never changes your STL file.</li>
+    <li>STL files carry no units. Models smaller than 12 units are assumed to be in inches and scaled ×25.4 automatically. Under <b>Model &amp; Orientation</b> you can set the scale yourself or use the <b>inch → ×25.4</b> button.</li>
+    <li>Turn the face you want to machine towards the cutter. Use <b>Lay Flat</b> (⌥⌘L) to put the largest flat face down, <b>Pick Face to Point Up</b> (⌥⌘U) or <b>Pick Face to Lay on Bed</b> (⌥⌘D) and click a face, or rotate in 90° steps about X, Y or Z (⌥⌘X / ⌥⌘Y / ⌥⌘Z).</li>
+    <li>Turn on <b>Highlight undercuts</b> to see faces a 3-axis machine can't reach from above. If important detail is highlighted, try a different side.</li>
+  </ol>
+  <div class="tip">A <b>Not watertight</b> warning in the status bar is usually fine. Swarf works from a height map, so small holes in the mesh don't matter. Check the 3D view for missing faces all the same.</div>
+
+  <h2 style="margin-top:16pt">5 · Stock, material and work zero</h2>
+  <p>Select <b>Stock &amp; Work Zero</b> in the sidebar.</p>
+  <ul>
+    <li><b>Material:</b> MDF, plywood, softwood, hardwood, acrylic, HDPE, foam or aluminium. The material scales each tool's default speeds and feeds.</li>
+    <li><b>Size from model + margins</b> sizes the stock automatically: set the XY margin and any extra on top or below. Turn it off to enter your real blank: Width (X), Depth (Y) and Thickness (Z).</li>
+    <li><b>Vertical</b> places the model at the top, centre or bottom of the stock. <b>Offset X / Y</b> shifts it within the blank.</li>
+    <li><b>Work zero</b>: pick one of 9 points on the stock, and set <b>Z zero</b> to the stock top or the bed. The WorkBee convention, and Swarf's default, is the <b>front-left corner, top of stock</b>.</li>
+    <li><b>Safe height</b> is how far above the stock the cutter travels between cuts.</li>
+    <li><b>Calculation resolution</b> (draft, normal or fine) trades accuracy for speed. Use draft while you experiment and normal or fine for the real job.</li>
+  </ul>
+
+  <h2 style="margin-top:16pt">6 · Choosing your machine</h2>
+  <p>Select <b>Machine &amp; Output</b> to pick the post-processor. The default is the <b>Ooznest WorkBee Z1+ (Duet / RRF)</b>. Profiles are also
+    included for generic RepRapFirmware, GRBL 1.1, Carbide 3D Shapeoko / Nomad, Sienci LongMill / AltMill, X-Carve, Genmitsu,
+    Onefinity, grblHAL / FluidNC, MASSO G3, LinuxCNC, Mach3 / Mach4, UCCNC and Marlin. Each profile knows the machine's work
+    envelope, maximum feeds and spindle range, and Swarf warns you if a job won't fit.</p>
+  <p>You can set the default machine, material and resolution for new projects in <b>Swarf ▸ Settings ▸ General</b>.</p>
+</section>
+
+<section class="chapter">
+  <h2>7 · The tool library</h2>
+  <figure class="w80"><img src="../screenshot-tools.png" alt="Tool library"><figcaption>Swarf ▸ Settings ▸ Tool Library.</figcaption></figure>
+  <p>Open <b>Swarf ▸ Settings…</b> (⌘,) and choose <b>Tool Library</b>. Select a tool to edit it, or use <b>Add Tool</b>, Duplicate and Delete.
+    <b>Import…</b> reads Fusion 360 tool libraries and Swarf JSON files, and <b>Export…</b> saves your library. <b>Reset</b> restores the starter set.</p>
+  <ul>
+    <li><b>Type:</b> flat end mill, ball nose, bull nose (with corner radius), V-bit (with included angle and tip diameter) or drill.</li>
+    <li><b>Geometry:</b> diameter, flutes, flute length (the cutting length), stick-out and shank diameter. Swarf warns you when a cut is deeper than the flute length.</li>
+    <li><b>Default cutting data</b> (an MDF baseline): spindle speed, feed, plunge, stepdown, stepover and ramp angle. The chip-load readout and warnings help you choose sensible values.</li>
+    <li><b>Tool number:</b> the T number written to the G-code.</li>
+  </ul>
+  <p>The starter library includes 6 mm flat and ball-nose compression cutters (50 mm flutes), 1/8", 1/4" and 3 mm cutters, a 6 mm bull nose,
+    and 60° and 45° 6 mm V-bits. New cutouts, pockets and drilling use the 6 mm flat, 3D finishing uses the 6 mm ball, and V-carving uses the 60° V-bit.</p>
+  <div class="tip">When you edit a tool in the library, open projects that use it pick up the new geometry. Each operation keeps its own feeds and T number,
+    so changing the library never silently changes the feeds of an operation you've already tuned.</div>
+</section>
+
+<section class="chapter">
+  <h2>8 · Operations</h2>
+  <p>An operation is one machining step with one tool. Click <b>Full Processing</b> in the sidebar to let Swarf look at the model and add what it needs:
+    facing if the model sits below the stock top, roughing and finishing for curved tops, pockets for cavities, and a cutout with tabs.
+    Or click <b>+</b> to add operations yourself. Operations run in list order. Drag them to reorder.</p>
+  <table>
+    <tr><th style="width:24%">Operation</th><th>Use it for</th></tr>
+    <tr><td>Facing</td><td>Flattening the stock top. Set the depth and choose zig-zag or one-way passes.</td></tr>
+    <tr><td>Pocket / Cavity</td><td>Flat-bottomed recesses such as pickup and control cavities. Offset passes with an exact pass on every flat floor.</td></tr>
+    <tr><td>3D Roughing</td><td>Removing bulk material from curved shapes layer by layer, leaving stock for finishing.</td></tr>
+    <tr><td>3D Finish – Parallel</td><td>Smooth surfaces with a ball nose, in raster passes at any angle. Optionally only on slopes below a set angle.</td></tr>
+    <tr><td>3D Finish – Waterline</td><td>Steep walls, using constant-height contours. Optionally only on slopes above a set angle.</td></tr>
+    <tr><td>V-Carve</td><td>Lettering and logos with a V-bit (see chapter 11).</td></tr>
+    <tr><td>Drill (Peck)</td><td>Round holes that match the tool size (see chapter 10).</td></tr>
+    <tr><td>Cutout (Profile)</td><td>Cutting the part free with tabs (see chapter 9).</td></tr>
+  </table>
+  <h3>Settings every operation has</h3>
+  <ul>
+    <li><b>Tool</b> from the library, and its <b>Tool number (T)</b>.</li>
+    <li><b>Feeds &amp; speeds:</b> spindle RPM, feed, plunge, stepdown (the depth of each pass), stepover (the sideways step, as a percentage of the diameter) and ramp angle. <b>Reset to tool defaults</b> reloads them from the library.</li>
+    <li><b>Area:</b> boundary (whole stock, model silhouette plus a margin, or inside the model only) and an optional custom bottom height.</li>
+    <li><b>Stock to leave:</b> radial (XY) and axial (Z) allowances for a later finishing operation.</li>
+    <li><b>Direction:</b> climb or conventional milling.</li>
+  </ul>
+  <p>Changes regenerate the toolpaths automatically. Each operation shows its estimated time, cutting length, depth range and any warnings.</p>
+</section>
+
+<section class="chapter">
+  <h2>9 · Cutouts, finishing passes and tabs</h2>
+  <figure><img src="../screenshot-cutout.png" alt="Cutout settings"><figcaption>Cutout settings with roughing passes, a finishing pass and holding tabs.</figcaption></figure>
+  <p>The cutout follows the outside of the model, offset by the tool radius, and goes through the stock by <b>Cut below stock</b> (0.3 mm by default).
+    <b>Also cut internal holes</b> cuts through-openings first, while the part is still held at the edges.</p>
+  <h3>Rough, then finish</h3>
+  <p>On by default. The <b>roughing</b> passes cut at your normal stepdown but stay <b>0.5 mm</b> (<b>Roughing leaves</b>) off the part.
+    A <b>finishing pass</b> then follows the true outline and removes that last 0.5 mm skin at a much deeper <b>Finish depth of cut</b>,
+    4× the roughing stepdown by default. With a 2 mm stepdown, the finishing pass takes 8 mm per pass. Because it only removes 0.5 mm sideways, the load stays light and the edge
+    comes out clean. If you change the finish depth, a <b>4×</b> button puts it back to the default.</p>
+  <h3>Holding tabs</h3>
+  <ul>
+    <li><b>Tabs per loop</b> places tabs automatically and moves them onto straight sections where possible. Or click <b>Place tabs by clicking</b> and click on the outline.</li>
+    <li><b>Width</b>, <b>Height</b> (above the stock bottom) and <b>Shape</b> (triangular/ramped or rectangular).</li>
+    <li><b>Skip loops shorter than</b> stops small slugs from getting tabs.</li>
+    <li>Both the roughing and the finishing passes leave the same tabs. Cut them with a flush-trim saw or chisel and sand them flush.</li>
+  </ul>
+</section>
+
+<section class="chapter">
+  <h2>10 · Peck drilling</h2>
+  <p><b>Drill (Peck)</b> finds round vertical holes in the model and drills the ones that match the tool, within
+    <b>Hole size match ±</b> (0.5 mm by default). Holes of other sizes are listed in a warning. Larger through holes are cut by the cutout,
+    and larger blind holes need a pocket.</p>
+  <ul>
+    <li><b>Peck depth</b> (the operation's stepdown, half the tool diameter by default) is how far each peck goes, at the plunge rate.</li>
+    <li><b>Full retract</b> backs out to 1 mm above the stock after every peck to clear chips, then drops quickly back to 0.5 mm above the last depth. Use it for deep holes.</li>
+    <li><b>Chip break</b> just lifts a little (<b>Chip-break lift</b>) to snap the chip. It's faster for shallow holes.</li>
+    <li>Blind holes stop at their floor. Through holes go below the stock by <b>Through holes: below stock</b>. A pointed drill goes deeper still, so its full diameter comes out of the bottom face.</li>
+    <li>The output is plain G0/G1 moves, so it runs on any firmware.</li>
+  </ul>
+  <div class="tip">Drill <b>before</b> the cutout, so the part is still held while it's drilled.</div>
+
+  <h2 style="margin-top:16pt">11 · V-carving</h2>
+  <p><b>V-Carve</b> engraves with a V-bit. The bit follows the centre line of each shape and goes deeper where the shape is wider,
+    so edges and corners stay sharp. <b>Engrave</b> chooses what is carved:</p>
+  <ul>
+    <li><b>Recesses</b>: areas sunk into the model's top face, such as text in a plaque.</li>
+    <li><b>Silhouette</b>: the model's whole outline, such as an STL of extruded lettering, carved into the stock top.</li>
+  </ul>
+  <p><b>Limit depth (flat bottom)</b> caps the depth for wide shapes. Stepdown splits deep carves into several passes. Use keep-out or machine-only
+    regions to limit what gets engraved. A 60° bit carves deeper and narrower than a 90° bit, and a 45° bit deeper still. Set the bit's tip diameter in the library if it isn't sharp.</p>
+</section>
+
+<section class="chapter">
+  <h2>12 · Keep-out regions</h2>
+  <p>Keep-out boxes protect features you don't want milled, or cover clamps.</p>
+  <ol class="steps">
+    <li>Click the draw-keep-out tool in the viewport strip (or the button next to <b>Regions</b>, ⌥⌘K) and drag a box in the 3D view.</li>
+    <li>Click a box to select it. It turns orange. Drag it to move it, nudge it with the arrow keys (1 mm; ⇧ 10 mm; ⌥ 0.1 mm), or press ⌫ to delete it. Click empty space to deselect.</li>
+    <li>In the inspector, set exact coordinates, switch the type to <b>Machine only within</b> (which limits operations to the inside of the box), or turn on <b>Allow cutting down to a height</b> to protect only what's below a set Z.</li>
+  </ol>
+  <p>The cutter stays a full radius away from keep-outs in every operation except cutouts. The simulator reports any keep-out violations.</p>
+
+  <h2 style="margin-top:16pt">13 · Simulation and checks</h2>
+  <p>Click <b>Simulate</b> (⌘R) to remove material from a virtual block of stock. Use the scrubber or play button to watch the job. Below the scrubber you'll see:</p>
+  <ul>
+    <li><b>Gouges</b>: places cut deeper than the model, shown in red. A good job says <b>No gouges</b>.</li>
+    <li><b>Max leftover</b>: material left behind, shown as a blue heat map. Expect some in inside corners smaller than the tool.</li>
+    <li><b>Removed</b> volume and any <b>keep-out violations</b>.</li>
+  </ul>
+  <p>Click <b>Exit</b> to return to the toolpath view. Warnings such as feeds out of range, cuts deeper than the flute length, a job outside the machine envelope, or
+    cuts below the stock bottom appear on each operation in the inspector.</p>
+</section>
+
+<section class="chapter">
+  <h2>14 · Exporting G-code</h2>
+  <figure class="w85"><img src="../screenshot-export.png" alt="Export sheet"><figcaption>The export sheet, with a preview of the WorkBee G-code.</figcaption></figure>
+  <ol class="steps">
+    <li>Click <b>Export G-code</b> (⌘E). Check the machine, the list of files, the stock size, the zero point and the run time.</li>
+    <li>Read the preview. The header lists the stock, the work zero, each tool and the run time.</li>
+    <li>Click <b>Export…</b> and choose a folder. <b>Setup Sheet (PDF)…</b> saves a printable sheet with the stock, the zero point, a top view and the tool list. <b>Copy G-code</b> puts the program on the clipboard.</li>
+  </ol>
+  <p>For the WorkBee, Swarf writes <b>one file per tool</b>, numbered in the order they run. Other machines get a single file with tool-change commands where the controller supports them.</p>
+
+  <h2 style="margin-top:16pt">15 · Running the job on a WorkBee</h2>
+  <ol class="steps">
+    <li>Fix the stock down, keeping clamps outside the toolpaths (or covered by keep-outs).</li>
+    <li>Fit the first tool. Jog to the <b>front-left corner of the stock</b> and set X and Y zero.</li>
+    <li>Probe or touch off Z on the <b>top of the stock</b>.</li>
+    <li>Upload the first file in the Duet web interface. For the first run, raise Z zero 10–20 mm and air-cut the start of the job.</li>
+    <li>Run the file. Stay at the machine with your hand near the emergency stop.</li>
+    <li>For each further file: change the bit, re-probe Z (keep X and Y), and run it.</li>
+  </ol>
+</section>
+
+<section class="chapter compact">
+  <h2>16 · Troubleshooting</h2>
+  <table>
+    <tr><th style="width:36%">Problem</th><th>What to try</th></tr>
+    <tr><td>"Operation produced no toolpath" or "Nothing to clear"</td><td>The tool may be too big for the feature, or the boundary excludes it. Try a smaller tool, or change the Area boundary.</td></tr>
+    <tr><td>Drilling skips holes</td><td>The holes don't match the tool diameter. Raise <b>Hole size match ±</b>, choose a matching tool, or use a pocket.</td></tr>
+    <tr><td>"Cut depth exceeds the tool's flute length"</td><td>The job is deeper than the bit can cut. Use a longer bit, or check the flute length in the tool library.</td></tr>
+    <tr><td>"Cuts below the stock bottom"</td><td>Check the stock thickness and model placement. For V-carving, set a depth limit or use a wider-angle bit.</td></tr>
+    <tr><td>Chip-load warnings</td><td>Low chip load rubs and burns, so raise the feed or lower the RPM. High chip load stresses the bit, so do the opposite.</td></tr>
+    <tr><td>Generating is slow</td><td>Use draft resolution while setting up and switch to normal or fine for the final job.</td></tr>
+    <tr><td>Model too small or large</td><td>It was probably modelled in inches or metres. Set the scale under Model &amp; Orientation.</td></tr>
+  </table>
+
+  <h2 style="margin-top:16pt">17 · Command line</h2>
+  <p><code>swarf-cli</code> runs the same engine without the app:</p>
+<pre>swift build -c release
+.build/release/swarf-cli model.stl --out ./gcode --simulate --png preview.png
+.build/release/swarf-cli model.stl --ops pocket,drill,cutout --material plywood
+.build/release/swarf-cli --list-machines</pre>
+  <p>Options: <code>--machine</code>, <code>--material</code>, <code>--quality draft|normal|fine</code>, <code>--lay-flat</code>, <code>--rotate x:90</code>,
+    <code>--ops</code> (facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout), <code>--keepout x0,y0,x1,y1</code>,
+    <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>.</p>
+
+  <h2 style="margin-top:16pt">18 · Keyboard shortcuts</h2>
+  <table>
+    <tr><th>Action</th><th>Shortcut</th><th>Action</th><th>Shortcut</th></tr>
+    <tr><td>Import STL</td><td>⇧⌘I</td><td>Lay flat</td><td>⌥⌘L</td></tr>
+    <tr><td>Generate toolpaths</td><td>⌘G</td><td>Pick face to point up</td><td>⌥⌘U</td></tr>
+    <tr><td>Simulate</td><td>⌘R</td><td>Pick face to lay on bed</td><td>⌥⌘D</td></tr>
+    <tr><td>Export G-code</td><td>⌘E</td><td>Rotate 90° about X / Y / Z</td><td>⌥⌘X / ⌥⌘Y / ⌥⌘Z</td></tr>
+    <tr><td>Settings / tool library</td><td>⌘,</td><td>Draw keep-out</td><td>⌥⌘K</td></tr>
+    <tr><td>Undo / Redo</td><td>⌘Z / ⇧⌘Z</td><td>Move / delete selected keep-out</td><td>Arrows / ⌫</td></tr>
+  </table>
+  <p style="color:var(--muted); font-size:9pt; margin-top:18pt">Swarf is free software under the MIT License, provided "as is", without warranty of any kind.
+    Source, issues and contributions: github.com/mouldiwarp/swarf.</p>
+</section>
+
+</body>
+</html>

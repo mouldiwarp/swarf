@@ -40,7 +40,11 @@ struct GeneralSettings: View {
 
 struct ToolLibraryView: View {
     @ObservedObject var store = ToolLibraryStore.shared
-    @State private var selection: UUID?
+    // Developer hook: -SwarfSelectTool N selects tool number N (automated screenshots).
+    @State private var selection: UUID? = {
+        let n = UserDefaults.standard.integer(forKey: "SwarfSelectTool")
+        return n > 0 ? ToolLibraryStore.shared.tools.first { $0.number == n }?.id : nil
+    }()
     @State private var message: String?
 
     var body: some View {

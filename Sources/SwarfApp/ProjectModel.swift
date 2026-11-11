@@ -127,7 +127,7 @@ final class ProjectModel: ObservableObject {
         }
     }
 
-    /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES,
+    /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES, -SwarfAutoExport YES,
     /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
     /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box).
     private func runAutomationHooks() {
@@ -141,6 +141,7 @@ final class ProjectModel: ObservableObject {
         }
         guard d.bool(forKey: "SwarfAutoProcess"), document.mesh != nil, document.job.operations.isEmpty else { return }
         if d.bool(forKey: "SwarfAutoSimulate") { pendingAutoSim = true }
+        if d.bool(forKey: "SwarfAutoExport") { pendingAutoExport = true }
         if let list = d.string(forKey: "SwarfAutoOps") {
             for k in list.split(separator: ",").compactMap({ OperationKind(rawValue: String($0)) }) { addOperation(k) }
         } else {
@@ -152,6 +153,7 @@ final class ProjectModel: ObservableObject {
     }
 
     private var pendingAutoSim = false
+    private var pendingAutoExport = false
 
     // MARK: Editing with undo
 
@@ -462,6 +464,7 @@ final class ProjectModel: ObservableObject {
         toolpaths = out
         toolpathVersion += 1
         if simMode || pendingAutoSim { pendingAutoSim = false; startSimulation() }
+        if pendingAutoExport { pendingAutoExport = false; showExport = true }
     }
 
     nonisolated static func makeContext(mesh: Mesh, job: Job) async -> CAMContext {

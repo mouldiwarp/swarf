@@ -6,6 +6,7 @@ struct ContentView: View {
     @ObservedObject var document: SwarfDocument
     @StateObject private var model: ProjectModel
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openSettings) private var openSettings
     @State private var dropTargeted = false
 
     init(document: SwarfDocument) {
@@ -48,6 +49,10 @@ struct ContentView: View {
         .onAppear {
             model.undoManager = undoManager
             if document.mesh == nil, let url = PendingImports.shared.next() { model.importSTL(url: url) }
+            // Developer hook: -SwarfOpenSettings YES (with -settingsTab 1 for the tool library).
+            if UserDefaults.standard.bool(forKey: "SwarfOpenSettings") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { openSettings() }
+            }
         }
         .onChange(of: undoManager) { _, um in model.undoManager = um }
         .fileImporter(isPresented: $model.showImporter, allowedContentTypes: [.stlModel, .data]) { result in

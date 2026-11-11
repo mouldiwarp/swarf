@@ -1,77 +1,125 @@
 # Swarf
 
-**Free, open-source, Mac-native CAM for hobby CNC.** Swarf takes an STL and turns it into G-code.
-Its default output is tailored to the **Ooznest WorkBee Z1+ (Duet / RepRapFirmware)**, and it ships
+**Free, open-source, Mac-native CAM for hobby CNC.** Swarf turns an STL into G-code. Its default
+output is tailored to the **Ooznest WorkBee Z1+ (Duet / RepRapFirmware)**, and it includes
 post-processors for most popular hobby machines.
 
-![Simulation](docs/screenshot-simulation.png)
+![A guitar body with pocket, drilling and cutout toolpaths](docs/screenshot-toolpaths.png)
 
-## Features
+> [!WARNING]
+> **Swarf is experimental software. You use it at your own discretion and risk.** Check every
+> toolpath before you run it, air-cut new jobs with Z zeroed above the stock, and try new jobs on
+> inexpensive material such as MDF or scrap first. Swarf is provided under the MIT License
+> **without warranty of any kind**. The app asks you to acknowledge this every time it starts.
 
-**Model setup (3-axis: X / Y / Z)**
-- Fast binary and ASCII STL import, with a mesh health check (watertight, open edges).
-- Rotate in 90° steps about X, Y or Z, or freely about Z.
-- **Pick the face that points up**, or **the face that lies on the bed**, by clicking it.
-- **Auto lay-flat**: puts the largest flat face down.
-- **Undercut highlighting** shows faces a 3-axis machine can't reach from the chosen side.
-- Unit detection (inch models are scaled ×25.4) and manual scale.
+📘 **[User guide (PDF)](docs/Swarf-User-Guide.pdf)**: step-by-step instructions from importing an STL to running the job.
 
-**Stock and work zero**
-- Stock is either model bounds plus margins or an explicit size.
-- The model sits at the top, centre or bottom of the stock, with an optional XY offset.
-- Pick the work zero on a 9-point grid, with Z on the stock top or the bed.
-  The WorkBee default is front-left, top of stock.
-- Material library (MDF, plywood, soft/hard wood, acrylic, HDPE, foam, aluminium).
-  The material scales each tool's default feeds.
+## Contents
 
-**Operations**
-| Strategy | Use |
+- [What it does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Getting started](#getting-started)
+- [A typical job](#a-typical-job)
+- [Operations](#operations)
+- [Tool library](#tool-library)
+- [Machines](#machines)
+- [Command line](#command-line)
+- [How it works](#how-it-works)
+- [Safety](#safety)
+- [Contributing](#contributing)
+- [License](#license)
+
+## What it does
+
+- **Import and orient** a model: rotate in 90° steps, click the face that should point up or lie on
+  the bed, or let Swarf lay the largest flat face down. Faces a 3-axis machine can't reach are
+  highlighted.
+- **Set up the stock and work zero.** The default is the WorkBee convention: front-left corner, top of
+  stock.
+- **Build the toolpaths.** One click on *Full Processing* analyses the model and adds the operations
+  it needs, or you can add them one at a time: facing, pockets, 3D roughing and finishing, V-carving,
+  peck drilling and cutouts with holding tabs.
+- **Protect features** with keep-out boxes you drag over the model. Click a box to select it, then
+  drag it, nudge it with the arrow keys, or delete it with ⌫.
+- **Simulate** material removal, with a gouge check, a leftover-stock heat map, keep-out checks and a
+  run-time estimate.
+- **Export** G-code for your machine, plus a printable PDF setup sheet.
+
+## Screenshots
+
+| | |
 |---|---|
-| Facing | Surface the stock top |
-| Pocket / Cavity | 2.5D carving inside the model outline, with exact passes on every flat floor |
-| 3D Roughing | Waterline offset clearing with ramp entries and stock-to-leave |
-| 3D Finish – Parallel | Raster at any angle, optionally limited to shallow slopes |
-| 3D Finish – Waterline | Constant-Z contours, optionally limited to steep walls |
-| V-Carve | Engraves text and logos with a V-bit: sharp corners, depth follows stroke width, optional flat-bottom depth limit |
-| Drill (Peck) | Finds round holes in the model that match the tool diameter and pecks them: full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Expanded into plain G0/G1 moves, so it runs on any firmware |
-| Cutout (profile) | Through-cut with ramping multi-pass, internal holes first, **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes the last skin at a deeper cut (default 4× the roughing stepdown) for a clean edge |
+| ![Simulation](docs/screenshot-simulation.png) | ![Cutout settings](docs/screenshot-cutout.png) |
+| **Simulation** after pocketing, peck drilling and cutting out a guitar body: no gouges and no leftover material. | **Cutout** with roughing passes that stay 0.5 mm off the part, a finishing pass at 4× the roughing depth, and ramped holding tabs. |
 
-- **Full Processing**: one click analyses the model and builds facing, roughing,
-  steep/shallow finishing and a cutout with tabs, choosing tools from your library.
-- **V-carving**: engrave either the *recesses in the model's top face* (e.g. a plaque STL with
-  sunken lettering) or the *model's whole outline* (e.g. an STL of extruded text or a logo) into the
-  stock. The V-bit follows the medial axis of each shape at depth = half-width ÷ tan(½ angle), so the
-  cone's edge traces the outline exactly. Explicit branches run into every sharp corner. A depth limit
-  gives flat-bottomed letters, and stepdown splits deep carves into passes. Keep-out and machine-only
-  regions limit what gets engraved, and the simulator treats engraved areas as intentional, not gouges.
-- **Tabs**: count per loop (automatically moved onto straight sections) or click to place them.
-  Rectangular or ramped/triangular, with settable width and height.
-- **Keep-out regions**: drag a box over any feature you don't want milled. The tool stays a full
-  cutter radius away, or you can allow cutting down to a set height. "Machine only within"
-  regions limit an operation to an area. Regions apply to every operation or only to the ones
-  you choose.
-- Climb or conventional milling, radial and axial stock-to-leave, custom floors, boundary modes.
+![Launch disclaimer](docs/screenshot-disclaimer.png)
 
-**Tool library**
-- Flat, ball, bull-nose, V-bit and drill tools, with defaults for RPM, feed, plunge, stepdown,
-  stepover and ramp.
-- Chip-load readout and feeds-and-speeds sanity warnings.
-- Saved for every project in `~/Library/Application Support/Swarf/tools.json`.
-- Import Fusion 360 tool libraries (`.json`), plus Swarf JSON import/export.
-- Edit a tool in the library and open projects using it pick up the new geometry. Each operation
-  keeps its own feeds and T number.
+## Getting started
 
-**Simulation and checks**
-- GPU-rendered material-removal simulation with playback and scrubbing.
-- **Gouge check**: overcuts show in red, leftover stock as a blue heat map.
-- Keep-out violation check, machine-envelope check, and flute-length and feed limits.
-- Run-time estimate that accounts for acceleration.
+Swarf runs on **macOS 15 or later** and builds from source with Xcode 16 or later (Swift 6).
 
-**Post-processors**
+```bash
+git clone https://github.com/mouldiwarp/swarf.git
+cd swarf
+scripts/build-app.sh          # builds build/Swarf.app
+open build/Swarf.app
+```
+
+You can copy `build/Swarf.app` to `/Applications`. To run the engine tests:
+
+```bash
+swift test -c release
+```
+
+## A typical job
+
+1. **Import STL** (⇧⌘I), or drop the file on the window.
+2. **Model & Orientation**: make sure the face you want to machine points up.
+3. **Stock & Work Zero**: check the stock size, the material and where you'll zero the machine.
+4. **Machine & Output**: choose your machine. The WorkBee Z1+ (RRF) is the default.
+5. **Operations**: click **Full Processing**, or **+** to add operations yourself. Select an
+   operation to edit its tool, feeds and settings in the inspector on the right.
+6. **Simulate** (⌘R): check for red gouges, blue leftover stock and keep-out warnings.
+7. **Export G-code** (⌘E). For the WorkBee you get one file per tool. Zero XY on the corner shown,
+   and probe Z before each file.
+8. **Air-cut** above the stock, then cut in scrap before cutting good material.
+
+The [user guide](docs/Swarf-User-Guide.pdf) covers each step in detail.
+
+## Operations
+
+| Operation | What it does |
+|---|---|
+| Facing | Surfaces the stock top |
+| Pocket / Cavity | 2.5D clearing inside the model outline, with exact passes on every flat floor |
+| 3D Roughing | Waterline offset clearing with ramped entries and stock to leave |
+| 3D Finish – Parallel | Raster passes at any angle, optionally only on shallow slopes |
+| 3D Finish – Waterline | Constant-Z contours, optionally only on steep walls |
+| V-Carve | Engraves text and logos with a V-bit. Corners stay sharp and the depth follows the stroke width. Optional flat-bottom depth limit |
+| Drill (Peck) | Finds round holes that match the tool diameter and pecks them, with a full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Output is plain G0/G1, so it runs on any firmware |
+| Cutout (Profile) | Cuts the part free, internal holes first, with **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes off the last skin at a deeper cut (4× the roughing stepdown by default) for a clean edge |
+
+Every operation has its own tool, spindle speed, feed, plunge rate, stepdown and stepover. You can
+also set climb or conventional cutting, stock to leave, and which keep-out regions apply.
+
+## Tool library
+
+Open **Swarf ▸ Settings ▸ Tool Library** to add, edit, duplicate or delete tools. Flat, ball nose,
+bull nose, V-bit and drill tools are supported. Each tool stores its diameter, flute length,
+stick-out and default cutting data, and Swarf shows the chip load with warnings when values look
+risky. The library is saved in `~/Library/Application Support/Swarf/tools.json`. You can import
+Fusion 360 tool libraries, and import or export Swarf's own JSON.
+
+The starter library includes 6 mm flat and ball-nose compression cutters, smaller flat and ball
+cutters, a bull nose, and 60° and 45° V-bits. **Measure your own bits and correct the library before
+your first job.** If you edit a tool, open projects pick up the change, while each operation keeps
+its own feeds.
+
+## Machines
 
 | Machine | Notes |
 |---|---|
-| **Ooznest WorkBee Z1+ (Duet / RRF)** (default) | `;` comments, `G4 S` dwell, arcs, one file per tool (zero XY on the corner and probe Z before each file) |
+| **Ooznest WorkBee Z1+ (Duet / RRF)** (default) | `;` comments, `G4 S` dwell, arcs, one file per tool |
 | Generic Duet / RepRapFirmware | Single file with an `M291` tool-change prompt |
 | Generic GRBL 1.1 | |
 | Carbide 3D Shapeoko / Nomad | `M6` for Carbide Motion and BitSetter |
@@ -86,65 +134,49 @@ post-processors for most popular hobby machines.
 | UCCNC | |
 | Marlin (MPCNC / LowRider) | |
 
-Arc fitting (G2/G3) shortens files and smooths motion. Export also produces a printable
-**PDF setup sheet** with the stock, the zero point, a top-view render and the tool list.
+Arc fitting (G2/G3) keeps files small and motion smooth. Profiles other than the WorkBee are
+best-effort. Check the header, spindle and tool-change commands against your controller before your
+first cut.
 
-## How it works
+## Command line
 
-The engine (`CAMCore`) is pure Swift and uses no GPL code:
-
-1. The oriented mesh is rasterised into a height field. Triangle edges are stamped as well, so thin
-   walls and ridges are never missed.
-2. For each operation, the height field is "inverse-offset" by the exact cutter profile
-   (flat / ball / bull / V) on the GPU with a Metal compute kernel. This is a heightmap drop-cutter
-   that gives the lowest safe tool-tip height everywhere. The 3D strategies apply a half-cell
-   conservative filter, so contact points between grid nodes can't gouge.
-3. Keep-outs and boundaries are applied by raising the height field *before* the cutter offset,
-   so every strategy keeps the right clearance without special cases.
-4. Offsets come from exact Euclidean distance transforms, and contours from multi-level marching
-   squares, oriented so loops are climb-milled by default.
-5. The simulator removes material from a stock height field with sub-cell-exact cutter stamping,
-   then compares the result with the model.
-
-A full dome job (rough, two finishes and a cutout with tabs) generates in about 3 seconds on Apple
-silicon.
-
-## Building
-
-Requires macOS 15+ and Xcode 16+ (Swift 6).
+`swarf-cli` runs the same engine without the app, which is handy for batch jobs and debugging.
 
 ```bash
-swift test -c release            # engine tests
-scripts/build-app.sh             # → build/Swarf.app
-open build/Swarf.app
-```
-
-### Command line
-
-```bash
-.build/release/swarf-cli model.stl --machine workbee-z1plus-rrf --out ./gcode --simulate --png preview.png
+swift build -c release
+.build/release/swarf-cli model.stl --out ./gcode --simulate --png preview.png
 .build/release/swarf-cli --list-machines
 ```
 
-Options: `--material`, `--quality draft|normal|fine`, `--lay-flat`, `--rotate x:90`,
-`--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`, `--keepout x0,y0,x1,y1`,
-`--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`.
+Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--lay-flat`,
+`--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
+`--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`.
+
+## How it works
+
+The engine (`CAMCore`) is pure Swift and uses no GPL code.
+
+1. The oriented mesh is rasterised into a height field. Triangle edges are stamped too, so thin walls
+   and ridges are never missed.
+2. For each operation, the height field is offset by the exact cutter shape (flat, ball, bull nose or
+   V) on the GPU. That gives the lowest safe tool-tip height everywhere.
+3. Keep-outs and boundaries raise the height field *before* that offset, so every strategy keeps the
+   right clearance.
+4. Offsets come from exact Euclidean distance transforms, and contours from marching squares.
+5. The simulator removes material from a stock height field and compares the result with the model.
 
 ## Safety
 
-CNC machines are dangerous. Always check the toolpaths in the simulator, air-cut new jobs with Z
-zeroed above the stock, keep hands clear, and wear eye and hearing protection. Machine profiles
-are best-effort: check the header, spindle and tool-change behaviour against your controller
-before your first cut. Swarf is provided under the MIT license **without warranty**.
+CNC machines can cause serious injury. Check toolpaths in the simulator. Air-cut new jobs with Z
+zeroed above the stock. Test on inexpensive material, keep hands clear, never leave the machine
+running unattended, and wear eye and hearing protection.
 
-## Roadmap
+## Contributing
 
-- V-carve with a separate flat end mill for clearing wide areas
-- Rest machining (remaining material from the previous tool)
-- Flip / two-sided setups with dowel registration
-- Editable custom post-processors in the UI
-- G-code panel synced with the 3D view
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Planned work
+includes rest machining, two-sided setups with dowel registration, a separate clearing tool for
+V-carving, editable post-processors and a G-code panel linked to the 3D view.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+[MIT](LICENSE) © Swarf contributors. Provided "as is", without warranty of any kind.

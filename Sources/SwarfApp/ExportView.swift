@@ -77,6 +77,7 @@ struct ExportView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
                 }
+                .defaultScrollAnchor(.topLeading)
                 .background(Color(nsColor: .textBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))

@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NSWindow.allowsAutomaticWindowTabbing = true
+        Disclaimer.presentAtLaunch()
         // Developer hook: -SwarfOpen <path> opens a file at launch (used for automated screenshots).
         if let path = UserDefaults.standard.string(forKey: "SwarfOpen") {
             PendingImports.open([URL(fileURLWithPath: path)])
@@ -32,6 +33,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         PendingImports.open(urls)
+    }
+}
+
+// MARK: Launch disclaimer
+
+enum Disclaimer {
+    static let title = "Swarf is experimental software"
+    static let message = """
+    Swarf is experimental, open-source software provided under the MIT License, without warranty of any kind. \
+    You use it, and any G-code it produces, entirely at your own discretion and risk.
+
+    • Check every toolpath and G-code file before you run it.
+    • Air-cut first, with Z zeroed well above the stock.
+    • Try new jobs on inexpensive material such as MDF, pine or scrap before good stock.
+    • Never leave a running machine unattended. Wear eye and hearing protection and keep hands clear.
+
+    The authors accept no liability for damage to machines, tools or materials, or for injury.
+    """
+
+    /// Shown on every launch; the app quits unless the user acknowledges it.
+    /// Developer hook: -SwarfSkipDisclaimer YES (automated screenshots only).
+    @MainActor static func presentAtLaunch() {
+        if UserDefaults.standard.bool(forKey: "SwarfSkipDisclaimer") { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "I Understand")
+        alert.addButton(withTitle: "Quit")
+        if alert.runModal() != .alertFirstButtonReturn { NSApp.terminate(nil) }
     }
 }
 

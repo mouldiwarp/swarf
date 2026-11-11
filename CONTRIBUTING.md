@@ -5,8 +5,8 @@ Thanks for helping make free CAM better on the Mac!
 ## Getting started
 
 ```bash
-git clone <your fork>
-cd stl-cam
+git clone https://github.com/mouldiwarp/swarf.git   # or your fork
+cd swarf
 swift test -c release        # engine tests (release mode keeps CAM tests fast)
 scripts/build-app.sh debug   # builds build/Swarf.app
 open build/Swarf.app
