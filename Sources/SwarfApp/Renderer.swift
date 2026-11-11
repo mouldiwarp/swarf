@@ -87,6 +87,7 @@ struct Uniforms {
     var eye: SIMD4<Float>
     var grid: SIMD4<Float>  // heightfield: originX, originY, res, stockTop
     var gridSize: SIMD4<UInt32>  // W, H
+    var shade: SIMD4<Float>  // depth tint: model top Z, depth range, enabled
 }
 
 final class Renderer: NSObject, MTKViewDelegate {
@@ -108,6 +109,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     // Scene buffers
     private var modelBuf: MTLBuffer?, modelCount = 0
     private var highlightBuf: MTLBuffer?, highlightCount = 0
+    private var edgeBuf: MTLBuffer?, edgeCount = 0
+    private var shade = SIMD4<Float>(0, 1, 0, 0)
     private var stockFaceBuf: MTLBuffer?, stockFaceCount = 0
     private var staticLineBuf: MTLBuffer?, staticLineCount = 0  // grid, stock edges, axes
     private var regionFaceBuf: MTLBuffer?, regionFaceCount = 0
@@ -179,7 +182,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     // MARK: Scene updates
 
     func setModel(_ placed: PlacedModel?, undercuts: Bool) {
-        guard let p = placed else { modelBuf = nil; modelCount = 0; return }
+        guard let p = placed else { modelBuf = nil; modelCount = 0; edgeBuf = nil; edgeCount = 0; shade.z = 0; return }
         var v: [MeshVertex] = []
         v.reserveCapacity(p.mesh.triangles.count * 3)
         let base = SIMD4<Float>(0.62, 0.68, 0.78, 1)
@@ -192,6 +195,19 @@ final class Renderer: NSObject, MTKViewDelegate {
             v.append(MeshVertex(pos: t.c, nrm: n, color: c))
         }
         modelBuf = buffer(v); modelCount = v.count
+        // Outline sharp edges so pockets and steps read clearly even from straight above.
+        let bb = p.modelBounds
+        let diag = Float(simd_length(bb.max - bb.min))
+        let lift = max(0.02, diag * 2e-4)
+        let ec = dark ? SIMD4<Float>(0.05, 0.06, 0.09, 0.85) : SIMD4<Float>(0.1, 0.12, 0.18, 0.75)
+        var l: [LineVertex] = []
+        for e in p.mesh.featureEdges() {
+            l.append(LineVertex(pos: e.a + e.n * lift, color: ec)); l.append(LineVertex(pos: e.b + e.n * lift, color: ec))
+        }
+        edgeBuf = buffer(l); edgeCount = l.count
+        // Tint the surface darker the further it sits below the model top.
+        let h = Float(bb.max.z - bb.min.z)
+        shade = SIMD4(Float(bb.max.z), max(3, min(25, h * 0.6)), 1, 0)
     }
 
     func setHighlight(_ placed: PlacedModel?, triangles: [Int]) {
@@ -245,13 +261,14 @@ final class Renderer: NSObject, MTKViewDelegate {
             let keep = r.kind == .keepOut
             let top = Float(keep ? (r.protectBelowZ ?? stockTop + 2) : stockTop + 2)
             let base: Float = keep && r.protectBelowZ != nil ? 0 : -0.5
-            let col: SIMD4<Float> = keep ? SIMD4(1, 0.25, 0.3, r.id == selected ? 0.35 : 0.2) : SIMD4(0.3, 1, 0.5, 0.12)
+            let col: SIMD4<Float> = keep ? (r.id == selected ? SIMD4(1, 0.6, 0.25, 0.35) : SIMD4(1, 0.25, 0.3, 0.2)) : SIMD4(0.3, 1, 0.5, 0.12)
             let a = SIMD2<Float>(Float(r.min.x), Float(r.min.y)), b = SIMD2<Float>(Float(r.max.x), Float(r.max.y))
             let c = [SIMD3(a.x, a.y, base), SIMD3(b.x, a.y, base), SIMD3(b.x, b.y, base), SIMD3(a.x, b.y, base),
                      SIMD3(a.x, a.y, top), SIMD3(b.x, a.y, top), SIMD3(b.x, b.y, top), SIMD3(a.x, b.y, top)]
             f += Self.boxFaces(c, color: col)
             var ec = col
             ec.w = 1
+            if r.id == selected { ec = SIMD4(1, 0.85, 0.3, 1) }
             for (i, j) in [(4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7), (0, 1), (1, 2), (2, 3), (3, 0)] {
                 l.append(LineVertex(pos: c[i], color: ec)); l.append(LineVertex(pos: c[j], color: ec))
             }
@@ -374,7 +391,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         let eye = camera.eye
         let light = simd_normalize(SIMD3<Float>(0.3, -0.5, 1) + simd_normalize(eye - camera.target) * 0.6)
         var u = Uniforms(viewProj: camera.projection(aspect: aspect) * camera.view(), lightDir: SIMD4(light, 0),
-                         eye: SIMD4(eye, dark ? 1 : 0), grid: heightGrid, gridSize: heightSize)
+                         eye: SIMD4(eye, dark ? 1 : 0), grid: heightGrid, gridSize: heightSize, shade: shade)
         // Background gradient
         enc.setRenderPipelineState(bgPipe)
         enc.setDepthStencilState(depthOff)
@@ -403,6 +420,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.setRenderPipelineState(lineBlendPipe)
         enc.setDepthStencilState(depthReadOnly)
         if let b = staticLineBuf { enc.setVertexBuffer(b, offset: 0, index: 0); enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: staticLineCount) }
+        if showModel && !showSim, let b = edgeBuf { enc.setVertexBuffer(b, offset: 0, index: 0); enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeCount) }
         if showPaths, let b = pathBuf {
             enc.setVertexBuffer(b, offset: 0, index: 0)
             let n = min(pathCount, pathDrawLimit ?? pathCount)
@@ -413,7 +431,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         if let b = regionLineBuf { enc.setVertexBuffer(b, offset: 0, index: 0); enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: regionLineCount) }
         // Transparent faces
         enc.setRenderPipelineState(meshBlendPipe)
-        if showStock && !showSim, let b = stockFaceBuf { enc.setVertexBuffer(b, offset: 0, index: 0); enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: stockFaceCount) }
+        if showStock && !showSim, let b = stockFaceBuf {
+            // Push the translucent stock faces back so they never fight with model faces lying in the same plane.
+            enc.setDepthBias(200, slopeScale: 4, clamp: 0.01)
+            enc.setVertexBuffer(b, offset: 0, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: stockFaceCount)
+            enc.setDepthBias(0, slopeScale: 0, clamp: 0)
+        }
         if let b = regionFaceBuf { enc.setVertexBuffer(b, offset: 0, index: 0); enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: regionFaceCount) }
         // Overlay (always on top)
         if let b = overlayLineBuf {
@@ -433,7 +457,7 @@ enum Shaders {
     #include <metal_stdlib>
     using namespace metal;
 
-    struct Uniforms { float4x4 viewProj; float4 lightDir; float4 eye; float4 grid; uint4 gridSize; };
+    struct Uniforms { float4x4 viewProj; float4 lightDir; float4 eye; float4 grid; uint4 gridSize; float4 shade; };
     struct MeshV { float3 pos; float3 nrm; float4 color; };
     struct LineV { float3 pos; float4 color; };
     struct VOut { float4 pos [[position]]; float3 nrm; float3 world; float4 color; };
@@ -452,7 +476,13 @@ enum Shaders {
         float hemi = 0.5 + 0.5 * n.z;
         float3 h = normalize(l + v);
         float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.25;
-        float3 c = in.color.rgb * (0.28 + 0.22 * hemi + 0.6 * diff) + spec;
+        float3 base = in.color.rgb;
+        if (u.shade.z > 0.5 && in.color.a > 0.99) {
+            // depth cue: deeper surfaces get darker and cooler
+            float t = clamp((u.shade.x - in.world.z) / u.shade.y, 0.0, 1.0);
+            base = mix(base, base * float3(0.42, 0.52, 0.72), t);
+        }
+        float3 c = base * (0.28 + 0.22 * hemi + 0.6 * diff) + spec;
         return float4(c, in.color.a);
     }
 

@@ -342,6 +342,8 @@ struct RegionInspector: View {
             }
             Section {
                 Button("Delete Region", role: .destructive) { model.deleteRegion(id) }
+                Text("In the view: click a box to select it, drag the selected box to move it, arrow keys nudge it (⇧ 10 mm, ⌥ 0.1 mm), ⌫ deletes it.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

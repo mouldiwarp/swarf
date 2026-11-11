@@ -128,9 +128,17 @@ final class ProjectModel: ObservableObject {
     }
 
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES,
-    /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template).
+    /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
+    /// -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box).
     private func runAutomationHooks() {
         let d = UserDefaults.standard
+        if document.mesh != nil, let v = d.string(forKey: "SwarfView"), let preset = ViewPreset(rawValue: v) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.viewRequest = preset }
+        }
+        if document.mesh != nil, document.job.regions.isEmpty, let k = d.string(forKey: "SwarfKeepOut") {
+            let n = k.split(separator: ",").compactMap { Double($0) }
+            if n.count == 4 { addRegion(min: V2(n[0], n[1]), max: V2(n[2], n[3])) }
+        }
         guard d.bool(forKey: "SwarfAutoProcess"), document.mesh != nil, document.job.operations.isEmpty else { return }
         if d.bool(forKey: "SwarfAutoSimulate") { pendingAutoSim = true }
         if let list = d.string(forKey: "SwarfAutoOps") {
@@ -306,6 +314,19 @@ final class ProjectModel: ObservableObject {
         let r = Region(name: "Keep-out \(job.regions.count + 1)", min: a, max: b)
         updateJob("Add Keep-out") { $0.regions.append(r) }
         selection = .region(r.id)
+    }
+
+    func moveRegion(_ id: UUID, by d: V2, actionName: String = "Move Region") {
+        updateJob(actionName) { j in
+            guard let i = j.regions.firstIndex(where: { $0.id == id }) else { return }
+            j.regions[i].min += d
+            j.regions[i].max += d
+        }
+    }
+
+    var selectedRegionID: UUID? {
+        if case .region(let id) = selection { return id }
+        return nil
     }
 
     func deleteRegion(_ id: UUID) {

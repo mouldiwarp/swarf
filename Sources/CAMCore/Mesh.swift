@@ -98,6 +98,55 @@ public struct Mesh: Sendable {
                            nonManifoldEdges: nonManifold, degenerateTriangles: degenerate)
     }
 
+    /// Sharp and open edges (after welding) for outline rendering: edges whose two faces meet at more than `angle`
+    /// degrees, plus edges with only one face. Each edge comes with the average normal of its faces.
+    public func featureEdges(angle: Float = 25, weldTolerance: Float = 1e-3) -> [(a: SIMD3<Float>, b: SIMD3<Float>, n: SIMD3<Float>)] {
+        var index: [SIMD3<Int32>: Int32] = [:]
+        var verts: [SIMD3<Float>] = []
+        index.reserveCapacity(triangles.count)
+        func vid(_ v: SIMD3<Float>) -> Int32 {
+            let k = SIMD3<Int32>(Int32((v.x / weldTolerance).rounded()), Int32((v.y / weldTolerance).rounded()),
+                                 Int32((v.z / weldTolerance).rounded()))
+            if let i = index[k] { return i }
+            let i = Int32(verts.count)
+            index[k] = i; verts.append(v)
+            return i
+        }
+        struct E { var n0: SIMD3<Float>; var n1: SIMD3<Float>?; var count: Int }
+        var edges: [UInt64: E] = [:]
+        edges.reserveCapacity(triangles.count * 3 / 2)
+        for t in triangles {
+            let ids = [vid(t.a), vid(t.b), vid(t.c)]
+            if ids[0] == ids[1] || ids[1] == ids[2] || ids[0] == ids[2] { continue }
+            let n = t.normal
+            for k in 0..<3 {
+                let i = ids[k], j = ids[(k + 1) % 3]
+                let key = UInt64(UInt32(min(i, j))) << 32 | UInt64(UInt32(max(i, j)))
+                if var e = edges[key] {
+                    if e.n1 == nil { e.n1 = n }
+                    e.count += 1
+                    edges[key] = e
+                } else {
+                    edges[key] = E(n0: n, n1: nil, count: 1)
+                }
+            }
+        }
+        let cosLimit = cos(angle * .pi / 180)
+        var out: [(a: SIMD3<Float>, b: SIMD3<Float>, n: SIMD3<Float>)] = []
+        for (key, e) in edges {
+            let a = verts[Int(key >> 32)], b = verts[Int(key & 0xffff_ffff)]
+            if let n1 = e.n1, e.count == 2 {
+                if simd_dot(e.n0, n1) >= cosLimit { continue }
+                let s = e.n0 + n1
+                let l = simd_length(s)
+                out.append((a, b, l > 1e-6 ? s / l : e.n0))
+            } else {
+                out.append((a, b, e.n0))
+            }
+        }
+        return out
+    }
+
     /// Distinct horizontal upward-facing plane heights (useful as extra roughing levels).
     public func flatUpwardFaceHeights(minArea: Float = 1, tolerance: Float = 0.01) -> [Double] {
         var buckets: [Int: (z: Double, area: Float)] = [:]

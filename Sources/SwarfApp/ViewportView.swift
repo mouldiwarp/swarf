@@ -11,6 +11,9 @@ final class ViewportMTKView: MTKView {
     private var rectEnd: V2?
     private var lastHoverTri: Int?
     private var didDrag = false
+    private var movingRegion: Region?
+    private var moveStart: V2?
+    private var moveDelta = V2.zero
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -45,21 +48,58 @@ final class ViewportMTKView: MTKView {
         return placed.mesh.raycast(origin: V3(Double(o.x), Double(o.y), Double(o.z)), direction: V3(Double(d.x), Double(d.y), Double(d.z)))?.index
     }
 
+    /// Nearest region box under the cursor (boxes as drawn: from just below the bed to above the stock).
+    private func pickRegion(_ e: NSEvent) -> Region? {
+        guard let model, let top = model.placed?.stockTop else { return nil }
+        let (o, d) = ray(e)
+        var best: (Region, Float)? = nil
+        for r in model.job.regions where r.enabled {
+            let zTop = Float(r.kind == .keepOut ? (r.protectBelowZ ?? top + 2) : top + 2)
+            let lo = SIMD3<Float>(Float(r.min.x), Float(r.min.y), -0.5), hi = SIMD3<Float>(Float(r.max.x), Float(r.max.y), zTop)
+            var t0: Float = -.greatestFiniteMagnitude, t1: Float = .greatestFiniteMagnitude
+            var hit = true
+            for k in 0..<3 {
+                if abs(d[k]) < 1e-9 {
+                    if o[k] < lo[k] || o[k] > hi[k] { hit = false; break }
+                } else {
+                    var a = (lo[k] - o[k]) / d[k], b = (hi[k] - o[k]) / d[k]
+                    if a > b { swap(&a, &b) }
+                    t0 = max(t0, a); t1 = min(t1, b)
+                }
+            }
+            guard hit, t0 <= t1, t1 > 0 || renderer.camera.ortho else { continue }
+            if best == nil || t0 < best!.1 { best = (r, t0) }
+        }
+        return best?.0
+    }
+
     // MARK: Mouse
 
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         dragStart = convert(e.locationInWindow, from: nil)
         didDrag = false
+        movingRegion = nil
         guard let model else { return }
         if model.mode == .drawKeepOut, let top = model.placed?.stockTop, let p = planeHit(e, z: top) {
             rectStart = p; rectEnd = p
+        }
+        // Dragging an already-selected box moves it; anywhere else the drag orbits as usual.
+        if model.mode == .orbit, !model.simMode, let sel = model.selectedRegionID, let top = model.placed?.stockTop,
+           let r = pickRegion(e), r.id == sel, let p = planeHit(e, z: top) {
+            movingRegion = r; moveStart = p; moveDelta = .zero
         }
     }
 
     override func mouseDragged(with e: NSEvent) {
         didDrag = true
         guard let model else { return }
+        if let r = movingRegion, let start = moveStart, let top = model.placed?.stockTop {
+            if let p = planeHit(e, z: top) { moveDelta = p - start }
+            renderer.setOverlay(rect: (r.min + moveDelta, r.max + moveDelta), z: top, tool: nil)
+            needsDisplay = true
+            return
+        }
         if model.mode == .drawKeepOut, rectStart != nil, let top = model.placed?.stockTop {
             if let p = planeHit(e, z: top) { rectEnd = p }
             renderer.setOverlay(rect: (rectStart!, rectEnd!), z: top, tool: nil)
@@ -76,10 +116,19 @@ final class ViewportMTKView: MTKView {
     override func mouseUp(with e: NSEvent) {
         defer { dragStart = nil }
         guard let model else { return }
+        if let r = movingRegion {
+            movingRegion = nil
+            renderer.setOverlay(rect: nil, z: 0, tool: nil)
+            needsDisplay = true
+            if didDrag && simd_length(moveDelta) > 0.01 { model.moveRegion(r.id, by: moveDelta) }
+            return
+        }
         switch model.mode {
         case .drawKeepOut:
             if let a = rectStart, let b = rectEnd, abs(a.x - b.x) > 0.5, abs(a.y - b.y) > 0.5 {
                 model.addRegion(min: simd_min(a, b), max: simd_max(a, b))
+            } else if let r = pickRegion(e) {
+                model.selection = .region(r.id)  // a click (not a drag) on an existing box selects it
             }
             rectStart = nil; rectEnd = nil
             renderer.setOverlay(rect: nil, z: 0, tool: nil)
@@ -89,7 +138,12 @@ final class ViewportMTKView: MTKView {
         case .placeTab:
             if !didDrag, let p = planeHit(e, z: (model.selectedOperation?.tabs.height ?? 0) / 2) { model.addTab(at: p) }
         case .orbit:
-            break
+            guard !didDrag, !model.simMode else { break }
+            if let r = pickRegion(e) {
+                model.selection = .region(r.id)
+            } else if model.selectedRegionID != nil {
+                model.selection = nil
+            }
         }
     }
 
@@ -131,6 +185,17 @@ final class ViewportMTKView: MTKView {
 
     override func keyDown(with e: NSEvent) {
         if e.keyCode == 53 { model?.mode = .orbit; return }  // Esc
+        if let model, let id = model.selectedRegionID {
+            switch e.keyCode {
+            case 51, 117:  // delete, forward delete
+                model.deleteRegion(id); return
+            case 123, 124, 125, 126:  // arrows nudge 1 mm (⇧ 10 mm, ⌥ 0.1 mm)
+                let step = e.modifierFlags.contains(.shift) ? 10.0 : e.modifierFlags.contains(.option) ? 0.1 : 1.0
+                let d: V2 = e.keyCode == 123 ? V2(-step, 0) : e.keyCode == 124 ? V2(step, 0) : e.keyCode == 125 ? V2(0, -step) : V2(0, step)
+                model.moveRegion(id, by: d, actionName: "Nudge Region"); return
+            default: break
+            }
+        }
         super.keyDown(with: e)
     }
 
