@@ -84,6 +84,11 @@ swift test -c release
    and probe Z before each file.
 8. **Air-cut** above the stock, then cut in scrap before cutting good material.
 
+**Test cuts.** Turn on **Test cut mode** in Stock & Work Zero to try a job on scrap such as 9 mm MDF.
+Cutouts stop 8 mm below the stock top (the thin skin left holds the part), pockets, carving and V-carving
+stop at 4 mm, and drilled holes at 4 mm. The depths can be changed. Exported files are named `_TEST` and
+say so in their header. Zero Z on the top of the test board.
+
 The [user guide](docs/Swarf-User-Guide.pdf) covers each step in detail.
 
 ## Operations
@@ -150,7 +155,8 @@ swift build -c release
 
 Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--lay-flat`,
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
-`--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`.
+`--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`,
+`--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`).
 
 ## How it works
 

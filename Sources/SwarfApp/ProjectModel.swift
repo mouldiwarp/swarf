@@ -406,7 +406,7 @@ final class ProjectModel: ObservableObject {
         enc.outputFormatting = .sortedKeys
         let maxTool = j.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }.max() ?? 5
         let parts: [Data] = [(try? enc.encode(j.orientation)) ?? Data(), (try? enc.encode(j.stock)) ?? Data(),
-                             (try? enc.encode(j.regions)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8)]
+                             (try? enc.encode(j.regions)) ?? Data(), (try? enc.encode(j.activeTestCut)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8)]
         return parts.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "#")
     }
 
@@ -516,6 +516,9 @@ final class ProjectModel: ObservableObject {
                 if !generating { out.append("\(op.name) has changed since it was calculated. Generate the toolpaths again before exporting.") }
             }
         }
+        if let t = job.activeTestCut {
+            out.append("Test cut mode is on: \(t.summary). The files are marked TEST and will not finish the part.")
+        }
         if job.operations.contains(where: { !$0.enabled }) && !job.operations.isEmpty {
             let off = job.operations.filter { !$0.enabled }.map(\.name).joined(separator: ", ")
             out.append("Switched off and not exported: \(off).")
@@ -539,7 +542,8 @@ final class ProjectModel: ObservableObject {
     func postProcessor(profile: MachineProfile? = nil) -> PostProcessor? {
         guard let placed else { return nil }
         return PostProcessor(profile: profile ?? machine, origin: placed.originPoint(job.origin),
-                             safeZ: placed.stockTop + job.safeHeight, jobName: document.modelName, stockSize: placed.stockSize)
+                             safeZ: placed.stockTop + job.safeHeight, jobName: document.modelName, stockSize: placed.stockSize,
+                             testCut: job.activeTestCut)
     }
 
     // MARK: View

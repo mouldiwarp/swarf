@@ -21,6 +21,8 @@ func usage(_ reason: String? = nil) -> Never {
       --simulate            run stock simulation and report gouges/leftover
       --png <file>          write a top-view preview (implies --simulate)
       --keepout x0,y0,x1,y1 add a keep-out rectangle in stock coordinates (repeatable)
+      --test-cut [c,p,d]    test-cut mode: cutouts c mm deep, pockets and carving p mm, holes d mm
+                            (default 8,4,4 for 9 mm MDF); output files are marked _TEST
     """)
     exit(2)
 }
@@ -71,6 +73,15 @@ while i < args.count {
         let v = next().split(separator: ",").compactMap { Double($0) }
         guard v.count == 4, v.allSatisfy(\.isFinite) else { usage("--keepout needs four numbers: x0,y0,x1,y1") }
         keepOuts.append(Region(name: "Keep-out \(keepOuts.count + 1)", min: V2(min(v[0], v[2]), min(v[1], v[3])), max: V2(max(v[0], v[2]), max(v[1], v[3]))))
+    case "--test-cut":
+        var t = TestCut()
+        t.enabled = true
+        if i + 1 < args.count, !args[i + 1].hasPrefix("--") {
+            let v = next().split(separator: ",").compactMap { Double($0) }
+            guard v.count == 3, v.allSatisfy({ $0.isFinite && $0 > 0 }) else { usage("--test-cut takes three depths, e.g. 8,4,4") }
+            t.cutoutDepth = v[0]; t.pocketDepth = v[1]; t.drillDepth = v[2]
+        }
+        job.testCut = t
     case "--lay-flat": layFlat = true
     case "--rotate":
         let parts = next().split(separator: ":")
@@ -138,7 +149,8 @@ do {
         for w in tp.warnings { print("    ⚠︎ \(w)") }
     }
     let post = PostProcessor(profile: profile, origin: ctx.placed.originPoint(job.origin), safeZ: ctx.safeZ,
-                             jobName: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent, stockSize: s)
+                             jobName: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent, stockSize: s,
+                             testCut: job.activeTestCut)
     for w in post.validate(out.toolpaths) { print("  ⚠︎ \(w)") }
     try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
     for f in post.process(out.toolpaths) {

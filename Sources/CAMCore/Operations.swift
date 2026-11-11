@@ -498,7 +498,7 @@ extension CAMContext {
         let allowance = max(0, fin.allowance)
         let finishing = fin.enabled && allowance > 1e-6
         let zTop = stockTop
-        let zBot = -op.throughDepth
+        let zBot = max(-op.throughDepth, testCutFloor(op) ?? -.infinity)
         let roughZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.cutting.stepdown)
         let finishZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.finishStepdown)
         let anchors = tabAnchors(op, finishLoops: finishLoops)

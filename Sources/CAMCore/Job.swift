@@ -209,6 +209,39 @@ public struct Job: Codable, Sendable, Equatable {
     public var quality: ResolutionQuality = .normal
     public var operations: [Operation] = []
     public var regions: [Region] = []
+    /// Test-cut depth limits. Optional so projects saved before it existed still open.
+    public var testCut: TestCut? = nil
+    public var testCutSettings: TestCut {
+        get { testCut ?? TestCut() }
+        set { testCut = newValue }
+    }
+    /// The limits in force, or nil when test-cut mode is off.
+    public var activeTestCut: TestCut? { testCut?.enabled == true ? testCut : nil }
 
     public init() {}
+}
+
+/// Test-cut mode: try a job on thin scrap (9 mm MDF by default) with every depth capped below the stock top.
+public struct TestCut: Codable, Sendable, Equatable, Hashable {
+    public var enabled = false
+    /// Cutouts stop this far below the stock top, leaving a skin that holds the part.
+    public var cutoutDepth = 8.0
+    /// Pockets, 3D roughing and finishing, and V-carving go no deeper than this.
+    public var pocketDepth = 4.0
+    /// Drilled and pecked holes go no deeper than this.
+    public var drillDepth = 4.0
+    public init() {}
+
+    public func depth(for kind: OperationKind) -> Double? {
+        switch kind {
+        case .cutout: return cutoutDepth
+        case .drill: return drillDepth
+        case .pocket, .roughing, .parallelFinish, .waterlineFinish, .vcarve: return pocketDepth
+        case .facing: return nil
+        }
+    }
+
+    public var summary: String {
+        String(format: "cutouts %g mm, pockets and carving %g mm, holes %g mm", cutoutDepth, pocketDepth, drillDepth)
+    }
 }

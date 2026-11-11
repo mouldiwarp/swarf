@@ -192,6 +192,20 @@ struct StockInspector: View {
                     LabeledContent("Result", value: String(format: "%.1f × %.1f × %.1f mm", p.stockSize.x, p.stockSize.y, p.stockSize.z))
                 }
             }
+            Section {
+                Toggle("Test cut mode", isOn: model.jobBinding(\.testCutSettings.enabled, name: "Test Cut Mode"))
+                if model.job.testCutSettings.enabled {
+                    NumberField(title: "Cutouts", value: model.jobBinding(\.testCutSettings.cutoutDepth, name: "Test Cut Depth"),
+                                step: 0.5, range: 0.5...100, digits: 1)
+                    NumberField(title: "Pockets & carving", value: model.jobBinding(\.testCutSettings.pocketDepth, name: "Test Cut Depth"),
+                                step: 0.5, range: 0.5...100, digits: 1)
+                    NumberField(title: "Drilled holes", value: model.jobBinding(\.testCutSettings.drillDepth, name: "Test Cut Depth"),
+                                step: 0.5, range: 0.5...100, digits: 1)
+                }
+            } header: { Text("Test cut") } footer: {
+                Text("Try the job on scrap such as 9 mm MDF. Every cut stops at these depths below the stock top, so the cutout leaves a thin skin holding the part. Facing is not limited. Zero Z on the top of the test board.")
+                    .font(.caption)
+            }
             Section("Model position in stock") {
                 Picker("Vertical", selection: model.jobBinding(\.stock.modelZ)) {
                     Text("Flush with top").tag(ModelZPlacement.top)

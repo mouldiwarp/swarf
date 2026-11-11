@@ -246,6 +246,10 @@ struct ViewportOverlay: View {
                         .help("\(d.openEdges) open edges, \(d.nonManifoldEdges) non-manifold edges. Heightmap CAM is tolerant of this.")
                 }
             }
+            if let t = model.job.activeTestCut {
+                Label("Test cut", systemImage: "testtube.2").foregroundStyle(.orange)
+                    .help("Test cut mode: \(t.summary). Turn it off in Stock settings for the real job.")
+            }
             if !model.toolpaths.isEmpty {
                 Label(formatDuration(model.totalSeconds), systemImage: "clock")
                     .help("Estimated machining time including accelerations")

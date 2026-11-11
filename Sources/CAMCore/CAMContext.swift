@@ -84,10 +84,21 @@ public final class CAMContext: @unchecked Sendable {
     // MARK: Fields
 
     public func floorZ(_ op: Operation) -> Double {
-        if let f = op.floorZ { return f }
-        let mb = placed.modelBounds.min.z
-        if op.kind == .pocket { return max(0, mb) }
-        return mb <= 0.01 ? min(op.bottomSkin, stockTop) : mb
+        let base: Double
+        if let f = op.floorZ {
+            base = f
+        } else {
+            let mb = placed.modelBounds.min.z
+            base = op.kind == .pocket ? max(0, mb) : (mb <= 0.01 ? min(op.bottomSkin, stockTop) : mb)
+        }
+        if op.kind != .cutout, op.kind != .drill, let t = testCutFloor(op) { return max(base, t) }
+        return base
+    }
+
+    /// The lowest Z an operation may reach in test-cut mode, or nil when the mode is off or does not apply.
+    public func testCutFloor(_ op: Operation) -> Double? {
+        guard let t = job.activeTestCut, let d = t.depth(for: op.kind), d.isFinite else { return nil }
+        return stockTop - max(0, d)
     }
 
     /// Effective obstacle heights for an operation (model + floor + boundary + regions + stock-to-leave).
@@ -226,6 +237,12 @@ public final class CAMContext: @unchecked Sendable {
         }
         let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(job.stock.materialID))
         tp.warnings.append(contentsOf: advice.warnings)
+        if let t = job.activeTestCut, let d = t.depth(for: op.kind) {
+            tp.warnings.append(String(format: "Test cut: no deeper than %g mm below the stock top.", d))
+            if job.origin.z == .stockBottom {
+                tp.warnings.append("Test cut with Z zero on the bed: the depths assume the full stock thickness. Zero Z on the top of the test board instead.")
+            }
+        }
         let deepest = tp.moves.map(\.to.z).min() ?? stockTop
         if op.kind != .cutout && op.kind != .drill && deepest < -0.01 {
             tp.warnings.append(String(format: "Cuts %.2f mm below the stock bottom%@.", -deepest,

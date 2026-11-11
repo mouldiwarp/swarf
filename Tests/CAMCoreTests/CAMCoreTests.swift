@@ -745,3 +745,85 @@ import simd
         #expect(blank.process([path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9))])[0].name == "job.nc")
     }
 }
+
+@Suite struct TestCutTests {
+    let lib = ToolLibrary.starter
+
+    func testJob(_ cut: Double = 8, _ pocket: Double = 4, _ drill: Double = 4) -> Job {
+        var job = Job()
+        job.quality = .draft
+        var t = TestCut()
+        t.enabled = true
+        t.cutoutDepth = cut; t.pocketDepth = pocket; t.drillDepth = drill
+        job.testCut = t
+        return job
+    }
+
+    func deepest(_ tp: Toolpath) -> Double { tp.moves.filter { $0.kind != .rapid }.map(\.to.z).min() ?? .infinity }
+
+    @Test func cutoutStopsAtTheCutoutDepth() throws {
+        var job = testJob()
+        let op = Operation(kind: .cutout, tool: lib.closest(kind: .flat, diameter: 6)!)
+        job.operations = [op]
+        let ctx = CAMContext(raw: STL.box(V3(40, 30, 20)), job: job)
+        let tp = try ctx.generate(op)
+        #expect(abs(deepest(tp) - (ctx.stockTop - 8)) < 1e-6)
+        #expect(tp.warnings.contains { $0.hasPrefix("Test cut") })
+    }
+
+    @Test func pocketsAndRoughingStopAtThePocketDepth() throws {
+        // The plate's pocket is 4 mm deep; a 2 mm limit must stop it short. A 20 mm block roughed must stop at 4 mm.
+        var job = testJob(8, 2, 4)
+        let pocket = Operation(kind: .pocket, tool: lib.closest(kind: .flat, diameter: 3.175)!)
+        job.operations = [pocket]
+        let plate = OperationTests().pocketPlate()
+        let ctx = CAMContext(raw: plate, job: job)
+        #expect(abs(deepest(try ctx.generate(pocket)) - (ctx.stockTop - 2)) < 1e-6)
+
+        var job2 = testJob()
+        let rough = Operation(kind: .roughing, tool: lib.closest(kind: .flat, diameter: 6)!)
+        job2.operations = [rough]
+        job2.stock.extraTop = 0
+        let ctx2 = CAMContext(raw: STL.dome(radius: 20, segments: 48, rings: 24, center: V2(25, 25)).translated(V3(0, 0, 0)), job: job2)
+        let tp = try ctx2.generate(rough)
+        #expect(deepest(tp) >= ctx2.stockTop - 4 - 1e-6)
+    }
+
+    @Test func drilledHolesStopAtTheDrillDepth() throws {
+        var job = testJob()
+        var op = Operation(kind: .drill, tool: lib.tools[0])
+        op.cutting.stepdown = 1.5
+        job.operations = [op]
+        let ctx = CAMContext(raw: DrillTests.plate(), job: job)
+        let tp = try ctx.generate(op)
+        // Both the through hole and the 5 mm blind hole stop 4 mm down.
+        let bottoms = Dictionary(grouping: tp.moves.filter { $0.kind == .plunge }, by: { V2(($0.to.x).rounded(), ($0.to.y).rounded()) })
+            .mapValues { $0.map(\.to.z).min()! }
+        #expect(bottoms.count == 2)
+        for z in bottoms.values { #expect(abs(z - (ctx.stockTop - 4)) < 1e-6) }
+    }
+
+    @Test func offByDefaultAndOldProjectsStillOpen() throws {
+        #expect(Job().activeTestCut == nil)
+        var job = testJob()
+        job.testCut?.enabled = false
+        let op = Operation(kind: .cutout, tool: lib.closest(kind: .flat, diameter: 6)!)
+        job.operations = [op]
+        let ctx = CAMContext(raw: STL.box(V3(40, 30, 20)), job: job)
+        #expect(deepest(try ctx.generate(op)) < 0)
+        // A job saved before test-cut mode existed has no "testCut" key.
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Job())) as! [String: Any]
+        json.removeValue(forKey: "testCut")
+        let old = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(old.activeTestCut == nil)
+    }
+
+    @Test func filesAreMarkedAsTests() {
+        let tp = PostSafetyTests().path(tool: lib.tools[0], from: V3(10, 10, 15), to: V3(20, 20, 9))
+        let post = PostProcessor(profile: .workbeeRRF, origin: .zero, safeZ: 15, jobName: "Body", stockSize: V3(50, 50, 10),
+                                 testCut: testJob().activeTestCut)
+        let f = post.process([tp])[0]
+        #expect(f.name == "Body_TEST.gcode")
+        #expect(f.content.contains("; TEST CUT - depths limited to: cutouts 8 mm, pockets and carving 4 mm, holes 4 mm."))
+    }
+}

@@ -153,12 +153,13 @@ extension CAMContext {
 
     /// Tip Z for a hole: its floor (plus Z stock to leave), or below the stock for through holes.
     func holeBottom(_ hole: Hole, _ op: Operation) -> Double {
-        if let f = hole.floorZ { return f + op.stockToLeaveZ }
+        let limit = testCutFloor(op) ?? -.infinity
+        if let f = hole.floorZ { return max(limit, f + op.stockToLeaveZ) }
         var z = -op.throughDepth
         if op.tool.kind == .drill {
             // Bring the full diameter out of the bottom face, not just the point.
             z -= max(0, op.tool.radius - op.tool.tipDiameter / 2) / tan(max(1, op.tool.vAngle / 2) * .pi / 180)
         }
-        return z
+        return max(limit, z)
     }
 }
