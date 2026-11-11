@@ -14,28 +14,6 @@ public enum ToolKind: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-/// Helix / flute geometry of an end mill. It changes how chips leave the cut and which face of sheet stock is clean.
-public enum FluteStyle: String, Codable, Sendable, CaseIterable, Identifiable {
-    case upcut, downcut, compression, straight
-    public var id: String { rawValue }
-    public var displayName: String {
-        switch self {
-        case .upcut: return "Upcut"
-        case .downcut: return "Downcut"
-        case .compression: return "Compression"
-        case .straight: return "Straight (0° helix)"
-        }
-    }
-    public var explanation: String {
-        switch self {
-        case .upcut: return "Lifts chips out: best chip clearing and deepest passes. Fuzzes the top edge of sheet goods and lifts thin parts, so use enough tabs."
-        case .downcut: return "Pushes chips down: clean top edge and holds parts down, but chips pack in deep slots. Keep stepdown ≤ 1× diameter and ramp in."
-        case .compression: return "Upcut tip, downcut above: clean top and bottom faces. The first pass goes deeper than the upcut length so the downcut flutes cut the top edge."
-        case .straight: return "Neutral: no lift or push, poor chip clearing. Use shallow passes and moderate feeds."
-        }
-    }
-}
-
 /// Cutting parameters. Feeds are mm/min, depths mm.
 public struct CuttingData: Codable, Sendable, Equatable, Hashable {
     public var rpm: Double
@@ -66,43 +44,18 @@ public struct Tool: Codable, Sendable, Identifiable, Equatable, Hashable {
     public var shankDiameter: Double = 6
     public var defaults: CuttingData
     public var notes: String = ""
-    // Optional storage so libraries and projects saved before these fields existed still load.
-    private var flute: FluteStyle? = nil
-    private var upcutLen: Double? = nil
-
-    public var fluteStyle: FluteStyle {
-        get { flute ?? .upcut }
-        set { flute = newValue }
-    }
-    /// Compression bits: length of the upcut section at the tip (mm).
-    public var upcutLength: Double {
-        get { upcutLen ?? 6 }
-        set { upcutLen = newValue }
-    }
-    /// End mills (flat, ball, bull nose) have a flute style; V-bits and drills don't.
-    public var hasFluteStyle: Bool { kind == .flat || kind == .ball || kind == .bullNose }
-
-    /// Z levels (descending) for cutting from `top` down to `bottom`. Compression bits take a first pass deeper than
-    /// their upcut section so the downcut flutes shear the top face. The remaining depth is split evenly.
+    /// Z levels (descending) for cutting from `top` down to `bottom`: the depth split into equal passes no deeper than `stepdown`.
     public func passLevels(top: Double, bottom: Double, stepdown: Double) -> [Double] {
         let total = top - bottom
         guard total > 1e-9 else { return [bottom] }
-        let sd = max(0.05, stepdown)
-        var first = sd
-        if hasFluteStyle && fluteStyle == .compression { first = max(sd, upcutLength + 1) }
-        if first >= total - 1e-9 { return [bottom] }
-        var levels = [top - first]
-        let rest = total - first
-        let n = max(1, Int(ceil(rest / sd - 1e-9)))
-        for k in 1...n { levels.append(top - first - rest * Double(k) / Double(n)) }
-        return levels
+        let n = max(1, Int(ceil(total / max(0.05, stepdown) - 1e-9)))
+        return (1...n).map { top - total * Double($0) / Double(n) }
     }
 
     public init(number: Int = 1, name: String, kind: ToolKind, diameter: Double, cornerRadius: Double = 0,
                 vAngle: Double = 90, flutes: Int = 2, fluteLength: Double = 20, stickout: Double = 30,
-                shankDiameter: Double? = nil, fluteStyle: FluteStyle? = nil, upcutLength: Double? = nil,
+                shankDiameter: Double? = nil,
                 defaults: CuttingData) {
-        self.flute = fluteStyle; self.upcutLen = upcutLength
         self.number = number; self.name = name; self.kind = kind; self.diameter = diameter
         self.cornerRadius = cornerRadius; self.vAngle = vAngle; self.flutes = flutes
         self.fluteLength = fluteLength; self.stickout = stickout
@@ -209,12 +162,6 @@ public enum FeedsAndSpeeds {
         if data.stepdown > tool.diameter * 1.5 { w.append("Stepdown exceeds 1.5× tool diameter.") }
         if data.stepdown > tool.fluteLength { w.append("Stepdown exceeds flute length.") }
         if data.plunge > data.feed { w.append("Plunge rate is higher than cutting feed.") }
-        if tool.hasFluteStyle && tool.fluteStyle == .downcut && data.stepdown > tool.diameter {
-            w.append("Downcut bits pack chips into the slot. Keep stepdown at or below 1× diameter.")
-        }
-        if tool.hasFluteStyle && tool.fluteStyle == .straight && data.stepdown > tool.diameter * 0.5 {
-            w.append("Straight-flute bits clear chips poorly. Keep stepdown at or below 0.5× diameter.")
-        }
         return Advice(chipLoad: cl, warnings: w)
     }
 
@@ -235,7 +182,7 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
         }
         return ToolLibrary(tools: [
             Tool(number: 1, name: "6 mm Flat Compression", kind: .flat, diameter: 6, flutes: 2, fluteLength: 50, stickout: 55,
-                 fluteStyle: .compression, upcutLength: 6, defaults: wood(18000, 1500, 400, 2.0, 45)),
+                 defaults: wood(18000, 1500, 400, 2.0, 45)),
             Tool(number: 2, name: "3.175 mm (1/8\") Flat 2F", kind: .flat, diameter: 3.175, flutes: 2, fluteLength: 17, stickout: 25,
                  shankDiameter: 3.175, defaults: wood(18000, 1000, 300, 1.5, 40)),
             Tool(number: 3, name: "6.35 mm (1/4\") Flat 2F", kind: .flat, diameter: 6.35, flutes: 2, fluteLength: 25, stickout: 32,
@@ -245,7 +192,7 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
             Tool(number: 5, name: "3 mm Ball Nose 2F", kind: .ball, diameter: 3, flutes: 2, fluteLength: 12, stickout: 25,
                  shankDiameter: 3.175, defaults: wood(18000, 1200, 300, 1.0, 10)),
             Tool(number: 6, name: "6 mm Ball Nose Compression", kind: .ball, diameter: 6, flutes: 2, fluteLength: 50, stickout: 55,
-                 fluteStyle: .compression, upcutLength: 6, defaults: wood(18000, 1500, 400, 1.5, 12)),
+                 defaults: wood(18000, 1500, 400, 1.5, 12)),
             Tool(number: 7, name: "1/8\" Ball Nose 2F", kind: .ball, diameter: 3.175, flutes: 2, fluteLength: 12, stickout: 25,
                  shankDiameter: 3.175, defaults: wood(18000, 1200, 300, 1.0, 10)),
             Tool(number: 8, name: "6 mm Bull Nose R1", kind: .bullNose, diameter: 6, cornerRadius: 1, flutes: 2,

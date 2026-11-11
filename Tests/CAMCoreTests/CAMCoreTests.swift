@@ -314,23 +314,8 @@ import simd
     }
 }
 
-@Suite struct FluteStyleTests {
-    @Test func compressionFirstPassClearsUpcutSection() {
-        var t = ToolLibrary.starter.tools[0]
-        #expect(t.fluteStyle == .compression && t.fluteLength == 50)
-        t.upcutLength = 6
-        // 18 mm sheet + 0.3 through, 2 mm stepdown: first pass 7 mm, then even passes no deeper than 2 mm.
-        let z = t.passLevels(top: 18, bottom: -0.3, stepdown: 2)
-        #expect(abs(z[0] - 11) < 1e-9)
-        #expect(abs(z.last! - -0.3) < 1e-9)
-        var prev = 11.0
-        for v in z.dropFirst() { #expect(prev - v <= 2 + 1e-9); prev = v }
-        // An upcut bit uses plain stepdowns.
-        t.fluteStyle = .upcut
-        #expect(abs(t.passLevels(top: 18, bottom: -0.3, stepdown: 2)[0] - 16) < 1e-9)
-    }
-
-    @Test func cutoutUsesCompressionFirstPass() async throws {
+@Suite struct PassLevelTests {
+    @Test func cutoutUsesEvenStepdowns() async throws {
         var job = Job()
         job.quality = .draft
         var op = Operation(kind: .cutout, tool: ToolLibrary.starter.tools[0], material: .named("mdf"))
@@ -338,18 +323,17 @@ import simd
         job.operations = [op]
         let ctx = CAMContext(raw: STL.box(V3(40, 30, 18)), job: job)
         let tp = try #require(await ctx.generateAll().toolpaths.first)
-        let levels = Set(tp.moves.filter { $0.kind == .feed }.map { ($0.to.z * 1000).rounded() / 1000 })
-        #expect(levels.contains(11))
-        #expect(!levels.contains(16))
+        let zs = Set(tp.moves.filter { $0.kind == .feed }.map { ($0.to.z * 1000).rounded() / 1000 }).sorted(by: >)
+        var prev = 18.0
+        for z in zs { #expect(prev - z <= op.cutting.stepdown + 1e-6); prev = z }
     }
 
-    @Test func oldToolJSONStillDecodes() throws {
-        var t = ToolLibrary.starter.tools[1]
-        let data = try JSONEncoder().encode(t)
+    @Test func toolJSONWithOldFluteFieldsStillDecodes() throws {
+        let data = try JSONEncoder().encode(ToolLibrary.starter.tools[0])
         var obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        obj.removeValue(forKey: "flute"); obj.removeValue(forKey: "upcutLen")
-        t = try JSONDecoder().decode(Tool.self, from: JSONSerialization.data(withJSONObject: obj))
-        #expect(t.fluteStyle == .upcut)
+        obj["flute"] = "compression"; obj["upcutLen"] = 6
+        let t = try JSONDecoder().decode(Tool.self, from: JSONSerialization.data(withJSONObject: obj))
+        #expect(t.fluteLength == 50)
     }
 }
 

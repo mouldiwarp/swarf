@@ -168,16 +168,6 @@ public final class CAMContext: @unchecked Sendable {
         let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(job.stock.materialID))
         tp.warnings.append(contentsOf: advice.warnings)
         let deepest = tp.moves.map(\.to.z).min() ?? stockTop
-        let t = op.tool
-        if t.hasFluteStyle && (op.kind == .cutout || op.kind == .pocket) && !tp.moves.isEmpty {
-            let depth = stockTop - deepest
-            if t.fluteStyle == .compression && depth < t.upcutLength + 0.5 {
-                tp.warnings.append(String(format: "This cut (%.1f mm) is shallower than the compression bit's upcut section (%.1f mm), so the top edge may fuzz. An upcut or downcut bit suits shallow work better.", depth, t.upcutLength))
-            }
-            if t.fluteStyle == .upcut && op.kind == .cutout && op.tabs.enabled == false {
-                tp.warnings.append("Upcut bits lift parts as they break free. Use tabs or other hold-down.")
-            }
-        }
         if op.kind != .cutout && deepest < -0.01 {
             tp.warnings.append(String(format: "Cuts %.2f mm below the stock bottom%@.", -deepest,
                                       op.kind == .vcarve ? " — set a depth limit or use a wider-angle V-bit" : ""))

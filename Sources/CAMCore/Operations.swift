@@ -148,14 +148,9 @@ extension CAMContext {
         let sd = max(0.05, op.cutting.stepdown)
         let so = min(op.stepover, op.tool.diameter * 0.95)
         var levels: [Double] = []
-        if op.kind == .pocket {
-            // 2.5D pockets leave visible top edges, so honour the compression first-pass rule.
-            levels = op.tool.passLevels(top: stockTop, bottom: floor, stepdown: sd)
-        } else {
-            var z = stockTop - sd
-            while z > floor + 1e-6 { levels.append(z); z -= sd }
-            levels.append(floor)
-        }
+        var z = stockTop - sd
+        while z > floor + 1e-6 { levels.append(z); z -= sd }
+        levels.append(floor)
         for f in flatLevels {
             let fz = f + op.stockToLeaveZ
             if fz > floor + 1e-3 && fz < stockTop - 1e-3 { levels.append(fz) }

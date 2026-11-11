@@ -377,13 +377,8 @@ struct OperationInspector: View {
                     if !tools.tools.contains(where: { $0.id == op.tool.id }) { Text(op.tool.name + " (project)").tag(op.tool.id) }
                     ForEach(tools.tools) { t in Text("T\(t.number) · \(t.name)").tag(t.id) }
                 }
-                LabeledContent("Geometry", value: String(format: "Ø%.3g mm %@%@, %d flute%@, %.0f mm flutes", op.tool.diameter,
-                                                          op.tool.hasFluteStyle ? op.tool.fluteStyle.displayName.lowercased() + " " : "",
+                LabeledContent("Geometry", value: String(format: "Ø%.3g mm %@, %d flute%@, %.0f mm flutes", op.tool.diameter,
                                                           op.tool.kind.displayName, op.tool.flutes, op.tool.flutes == 1 ? "" : "s", op.tool.fluteLength))
-                if op.tool.hasFluteStyle && op.tool.fluteStyle == .compression && (op.kind == .cutout || op.kind == .pocket) {
-                    Text(String(format: "First pass goes %.1f mm deep so the downcut flutes cut the top edge.", max(op.cutting.stepdown, op.tool.upcutLength + 1)))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 IntField(title: "Tool number (T)", value: b(\.tool.number), range: 1...99)
             }
             Section("Feeds & speeds") {

@@ -53,8 +53,7 @@ struct ToolLibraryView: View {
                             ForEach(tools) { t in
                                 VStack(alignment: .leading) {
                                     Text("T\(t.number) · \(t.name)")
-                                    Text(String(format: "Ø%.3g mm · %@%d fl · %.0f mm cut · %.0f RPM · %.0f mm/min", t.diameter,
-                                                t.hasFluteStyle ? t.fluteStyle.displayName.lowercased() + " · " : "",
+                                    Text(String(format: "Ø%.3g mm · %d fl · %.0f mm cut · %.0f RPM · %.0f mm/min", t.diameter,
                                                 t.flutes, t.fluteLength, t.defaults.rpm, t.defaults.feed))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
@@ -140,15 +139,6 @@ struct ToolEditor: View {
                 if tool.kind == .vBit || tool.kind == .drill {
                     NumberField(title: "Included angle", value: $tool.vAngle, unit: "°", step: 5, range: 10...170, digits: 1)
                     NumberField(title: "Tip diameter", value: $tool.tipDiameter, step: 0.05, range: 0...10)
-                }
-                if tool.hasFluteStyle {
-                    Picker("Flute style", selection: $tool.fluteStyle) {
-                        ForEach(FluteStyle.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    if tool.fluteStyle == .compression {
-                        NumberField(title: "Upcut length", value: $tool.upcutLength, step: 0.5, range: 0...50)
-                    }
-                    Text(tool.fluteStyle.explanation).font(.caption).foregroundStyle(.secondary)
                 }
                 IntField(title: "Flutes", value: $tool.flutes, range: 1...8)
                 NumberField(title: "Flute length", value: $tool.fluteLength, step: 1, range: 0.5...200)

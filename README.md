@@ -57,9 +57,6 @@ post-processors for most popular hobby machines.
 - Chip-load readout and feeds-and-speeds sanity warnings.
 - Saved for every project in `~/Library/Application Support/Swarf/tools.json`.
 - Import Fusion 360 tool libraries (`.json`), plus Swarf JSON import/export.
-- **Flute style** (upcut, downcut, compression, straight) shapes the strategy. A compression bit's first
-  cutout or pocket pass goes deeper than its upcut section, so the downcut flutes shear the top face; the
-  rest of the depth is split evenly. Downcut and straight-flute bits get stepdown warnings.
 - Edit a tool in the library and open projects using it pick up the new geometry. Each operation
   keeps its own feeds and T number.
 
