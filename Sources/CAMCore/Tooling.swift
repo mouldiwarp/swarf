@@ -197,9 +197,9 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
                  shankDiameter: 3.175, defaults: wood(18000, 1200, 300, 1.0, 10)),
             Tool(number: 8, name: "6 mm Bull Nose R1", kind: .bullNose, diameter: 6, cornerRadius: 1, flutes: 2,
                  fluteLength: 20, stickout: 30, defaults: wood(18000, 1500, 400, 1.5, 30)),
-            Tool(number: 9, name: "60° V-Bit 1/4\"", kind: .vBit, diameter: 6.35, vAngle: 60, flutes: 2, fluteLength: 8,
+            Tool(number: 9, name: "60° V-Bit 6 mm", kind: .vBit, diameter: 6, vAngle: 60, flutes: 2, fluteLength: 5.2,
                  stickout: 25, defaults: wood(18000, 1000, 300, 1.0, 20)),
-            Tool(number: 10, name: "90° V-Bit 1/4\"", kind: .vBit, diameter: 6.35, vAngle: 90, flutes: 2, fluteLength: 6,
+            Tool(number: 10, name: "45° V-Bit 6 mm", kind: .vBit, diameter: 6, vAngle: 45, flutes: 2, fluteLength: 7.24,
                  stickout: 25, defaults: wood(18000, 1000, 300, 1.0, 20)),
         ])
     }()

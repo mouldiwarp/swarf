@@ -187,7 +187,9 @@ import simd
 
 @Suite struct VCarveTests {
     let lib = ToolLibrary.starter
-    var vbit90: Tool { lib.tools.first { $0.kind == .vBit && $0.vAngle == 90 }! }
+    // A 90° bit keeps the expected groove depth equal to the distance from the edge.
+    var vbit90: Tool { Tool(number: 20, name: "90° test V-bit", kind: .vBit, diameter: 6.35, vAngle: 90, flutes: 2, fluteLength: 6,
+                            stickout: 25, defaults: CuttingData(rpm: 18000, feed: 1000, plunge: 300, stepdown: 1, stepoverPercent: 20)) }
 
     /// An "L" of 4 mm wide strokes, 2 mm tall, standing on thicker stock.
     func lJob(maxDepth: Double = 0) -> (Mesh, Job) {
@@ -311,6 +313,16 @@ import simd
         tool.tipDiameter = 0
         #expect(abs(tool.cuttingRadius(depth: 0.5) - 0.5) < 1e-9)
         #expect(abs(tool.cuttingRadius(depth: 10) - tool.radius) < 1e-9)
+    }
+}
+
+@Suite struct StarterLibraryTests {
+    @Test func vBitsAre60And45Degree6mm() {
+        let v = ToolLibrary.starter.tools.filter { $0.kind == .vBit }
+        #expect(v.map(\.vAngle).sorted() == [45, 60])
+        #expect(v.allSatisfy { $0.diameter == 6 })
+        // Flute length covers the full cone height: r / tan(half angle).
+        for t in v { #expect(abs(t.fluteLength - 3 / tan(t.vAngle / 2 * .pi / 180)) < 0.05) }
     }
 }
 
