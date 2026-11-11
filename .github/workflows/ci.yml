@@ -1,0 +1,24 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Unit tests (release, for realistic CAM performance)
+        run: swift test -c release
+      - name: Build app bundle
+        run: scripts/build-app.sh release
+      - name: CLI smoke test
+        run: |
+          .build/release/swarf-cli Tests/Fixtures/dome_relief.stl --out out --simulate
+          .build/release/swarf-cli Tests/Fixtures/pocket_plate.stl --machine grbl --out out --simulate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Swarf.app
+          path: build/Swarf.app

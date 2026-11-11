@@ -82,14 +82,22 @@ public struct Grid2D: Sendable {
     public func map(_ f: (Float) -> Float) -> Grid2D { Grid2D(like: self, data: data.map(f)) }
 }
 
+/// Wrapper for values shared across a data-parallel loop where each worker touches a disjoint range.
+struct UncheckedSendable<T>: @unchecked Sendable { let value: T }
+
 enum Parallel {
+    /// Splits `0..<n` into contiguous ranges processed concurrently. Bodies must only write
+    /// to memory owned by their own range.
     static func forEach(_ n: Int, chunk: Int = 1, _ body: (Range<Int>) -> Void) {
         guard n > 0 else { return }
         let workers = Swift.min(ProcessInfo.processInfo.activeProcessorCount * 2, Swift.max(1, n / Swift.max(1, chunk)))
         let per = (n + workers - 1) / workers
-        DispatchQueue.concurrentPerform(iterations: workers) { w in
-            let lo = w * per, hi = Swift.min(n, lo + per)
-            if lo < hi { body(lo..<hi) }
+        withoutActuallyEscaping(body) { body in
+            let box = UncheckedSendable(value: body)
+            DispatchQueue.concurrentPerform(iterations: workers) { w in
+                let lo = w * per, hi = Swift.min(n, lo + per)
+                if lo < hi { box.value(lo..<hi) }
+            }
         }
     }
 }

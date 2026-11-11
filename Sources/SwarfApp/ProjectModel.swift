@@ -385,7 +385,7 @@ final class ProjectModel: ObservableObject {
             status[op.id] = .running(0)
             let id = op.id
             do {
-                let tp = try await Self.generate(ctx: ctx, op: op) { p in
+                let tp = try await Self.generate(ctx: ctx, op: op) { [weak self] p in
                     Task { @MainActor [weak self] in
                         if case .running = self?.status[id] { self?.status[id] = .running(p) }
                     }
@@ -496,7 +496,7 @@ final class ProjectModel: ObservableObject {
         guard simPlaying else { return }
         if simPosition >= 1 { simPosition = 0 }
         playTimer = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 let step = 1.0 / max(60, Double(self.totalSimSegments) / 200) / 3
                 self.simPosition = min(1, self.simPosition + max(step, 1.0 / 1800))

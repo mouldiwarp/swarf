@@ -76,10 +76,10 @@ public enum Contours {
             let ox = g.origin.x, oy = g.origin.y, res = g.res
             bandResults.withUnsafeMutableBufferPointer { outBuf in
                 let outs = outBuf.baseAddress!
-                DispatchQueue.concurrentPerform(iterations: bandCount) { b in
+                Parallel.forEach(bandCount) { bands in for b in bands {
                     var local: [(Int, Int, Int, V2, V2)] = []
                     let y0 = -1 + b * rowsPer, y1 = min(H - 1, y0 + rowsPer - 1)
-                    if y0 > y1 { return }
+                    if y0 > y1 { continue }
                     for y in y0...y1 {
                         for x in -1..<W {
                             let v0 = val(x, y), v1 = val(x + 1, y), v2 = val(x + 1, y + 1), v3 = val(x, y + 1)
@@ -127,7 +127,7 @@ public enum Contours {
                         }
                     }
                     outs[b] = local
-                }
+                } }
             }
         }
         for band in bandResults {

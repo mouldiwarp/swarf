@@ -185,6 +185,28 @@ import simd
     }
 }
 
+@Suite struct ProjectTests {
+    @Test func jobRoundTripsThroughJSON() throws {
+        var job = Job()
+        job.orientation.rotate(axis: V3(1, 0, 0), degrees: 90)
+        job.regions = [Region(name: "Logo", min: V2(1, 2), max: V2(10, 20))]
+        job.regions[0].protectBelowZ = 4
+        var op = Operation(kind: .cutout, tool: ToolLibrary.starter.tools[1])
+        op.tabs.manualPositions = [V2(5, 5)]
+        op.regionIDs = [job.regions[0].id]
+        job.operations = [op, Operation(kind: .parallelFinish, tool: ToolLibrary.starter.tools[4])]
+        let data = try JSONEncoder().encode(job)
+        let back = try JSONDecoder().decode(Job.self, from: data)
+        #expect(back == job)
+    }
+
+    @Test func machineProfilesHaveUniqueIDs() {
+        let ids = MachineProfile.builtIn.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(MachineProfile.find("does-not-exist").id == MachineProfile.workbeeRRF.id)
+    }
+}
+
 @Suite struct PostTests {
     func simpleToolpath() -> Toolpath {
         let tool = ToolLibrary.starter.tools[0]
