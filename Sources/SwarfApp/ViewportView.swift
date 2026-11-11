@@ -4,7 +4,7 @@ import SwiftUI
 
 /// MTKView subclass that turns mouse / trackpad input into camera moves and picking.
 final class ViewportMTKView: MTKView {
-    var renderer: Renderer!
+    var renderer: Renderer?
     weak var model: ProjectModel?
     private var dragStart: NSPoint?
     private var rectStart: V2?
@@ -29,29 +29,30 @@ final class ViewportMTKView: MTKView {
         return SIMD2(Float(p.x / bounds.width) * 2 - 1, Float(p.y / bounds.height) * 2 - 1)
     }
 
-    private func ray(_ e: NSEvent) -> (SIMD3<Float>, SIMD3<Float>) {
-        renderer.camera.ray(ndc: ndc(e), aspect: Float(bounds.width / max(1, bounds.height)))
+    /// Nil when there is no renderer (Metal unavailable) or the view has no size yet.
+    private func ray(_ e: NSEvent) -> (SIMD3<Float>, SIMD3<Float>)? {
+        guard let renderer, bounds.width > 0, bounds.height > 0 else { return nil }
+        return renderer.camera.ray(ndc: ndc(e), aspect: Float(bounds.width / max(1, bounds.height)))
     }
 
+    private var ortho: Bool { renderer?.camera.ortho ?? false }
+
     private func planeHit(_ e: NSEvent, z: Double) -> V2? {
-        let (o, d) = ray(e)
-        guard abs(d.z) > 1e-6 else { return nil }
+        guard let (o, d) = ray(e), abs(d.z) > 1e-6 else { return nil }
         let t = (Float(z) - o.z) / d.z
-        guard t > 0 || renderer.camera.ortho else { return nil }
+        guard t > 0 || ortho else { return nil }
         let p = o + d * t
         return V2(Double(p.x), Double(p.y))
     }
 
     private func pickTriangle(_ e: NSEvent) -> Int? {
-        guard let placed = model?.placed else { return nil }
-        let (o, d) = ray(e)
+        guard let placed = model?.placed, let (o, d) = ray(e) else { return nil }
         return placed.mesh.raycast(origin: V3(Double(o.x), Double(o.y), Double(o.z)), direction: V3(Double(d.x), Double(d.y), Double(d.z)))?.index
     }
 
     /// Nearest region box under the cursor (boxes as drawn: from just below the bed to above the stock).
     private func pickRegion(_ e: NSEvent) -> Region? {
-        guard let model, let top = model.placed?.stockTop else { return nil }
-        let (o, d) = ray(e)
+        guard let model, let top = model.placed?.stockTop, let (o, d) = ray(e) else { return nil }
         var best: (Region, Float)? = nil
         for r in model.job.regions where r.enabled {
             let zTop = Float(r.kind == .keepOut ? (r.protectBelowZ ?? top + 2) : top + 2)
@@ -67,7 +68,7 @@ final class ViewportMTKView: MTKView {
                     t0 = max(t0, a); t1 = min(t1, b)
                 }
             }
-            guard hit, t0 <= t1, t1 > 0 || renderer.camera.ortho else { continue }
+            guard hit, t0 <= t1, t1 > 0 || ortho else { continue }
             if best == nil || t0 < best!.1 { best = (r, t0) }
         }
         return best?.0
@@ -96,13 +97,13 @@ final class ViewportMTKView: MTKView {
         guard let model else { return }
         if let r = movingRegion, let start = moveStart, let top = model.placed?.stockTop {
             if let p = planeHit(e, z: top) { moveDelta = p - start }
-            renderer.setOverlay(rect: (r.min + moveDelta, r.max + moveDelta), z: top, tool: nil)
+            renderer?.setOverlay(rect: (r.min + moveDelta, r.max + moveDelta), z: top, tool: nil)
             needsDisplay = true
             return
         }
         if model.mode == .drawKeepOut, rectStart != nil, let top = model.placed?.stockTop {
             if let p = planeHit(e, z: top) { rectEnd = p }
-            renderer.setOverlay(rect: (rectStart!, rectEnd!), z: top, tool: nil)
+            renderer?.setOverlay(rect: (rectStart!, rectEnd!), z: top, tool: nil)
             needsDisplay = true
             return
         }
@@ -118,7 +119,7 @@ final class ViewportMTKView: MTKView {
         guard let model else { return }
         if let r = movingRegion {
             movingRegion = nil
-            renderer.setOverlay(rect: nil, z: 0, tool: nil)
+            renderer?.setOverlay(rect: nil, z: 0, tool: nil)
             needsDisplay = true
             if didDrag && simd_length(moveDelta) > 0.01 { model.moveRegion(r.id, by: moveDelta) }
             return
@@ -131,7 +132,7 @@ final class ViewportMTKView: MTKView {
                 model.selection = .region(r.id)  // a click (not a drag) on an existing box selects it
             }
             rectStart = nil; rectEnd = nil
-            renderer.setOverlay(rect: nil, z: 0, tool: nil)
+            renderer?.setOverlay(rect: nil, z: 0, tool: nil)
             needsDisplay = true
         case .faceUp, .faceDown:
             if !didDrag, let t = pickTriangle(e) { model.pickFace(triangle: t, up: model.mode == .faceUp) }
@@ -179,7 +180,7 @@ final class ViewportMTKView: MTKView {
 
     override func magnify(with e: NSEvent) { zoom(Float(1 - e.magnification)) }
     override func rotate(with e: NSEvent) {
-        renderer.camera.yaw -= e.rotation * .pi / 180
+        renderer?.camera.yaw -= e.rotation * .pi / 180
         needsDisplay = true
     }
 
@@ -200,12 +201,14 @@ final class ViewportMTKView: MTKView {
     }
 
     func orbit(dx: CGFloat, dy: CGFloat) {
-        renderer.camera.yaw -= Float(dx) * 0.008
+        renderer?.camera.yaw -= Float(dx) * 0.008
+        guard let renderer else { return }
         renderer.camera.pitch = max(-1.5, min(1.5707, renderer.camera.pitch + Float(dy) * 0.008))
         needsDisplay = true
     }
 
     func pan(dx: CGFloat, dy: CGFloat) {
+        guard let renderer else { return }
         let c = renderer.camera
         let v = c.view()
         let right = SIMD3<Float>(v[0][0], v[1][0], v[2][0])
@@ -216,6 +219,7 @@ final class ViewportMTKView: MTKView {
     }
 
     func zoom(_ f: Float) {
+        guard let renderer, f.isFinite else { return }
         renderer.camera.distance = max(5, min(20000, renderer.camera.distance * max(0.5, min(1.5, f))))
         needsDisplay = true
     }
@@ -242,7 +246,11 @@ struct ViewportView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ViewportMTKView {
         let v = ViewportMTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
-        guard let r = Renderer(view: v) else { return v }
+        guard let r = Renderer(view: v) else {
+            let model = self.model
+            DispatchQueue.main.async { model.errorMessage = "The 3D view could not start because Metal graphics are not available on this Mac." }
+            return v
+        }
         v.renderer = r
         v.delegate = r
         v.model = model

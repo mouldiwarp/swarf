@@ -54,6 +54,15 @@ public struct Mesh: Sendable {
         return Mesh(triangles: triangles.map { Triangle($0.a * f, $0.b * f, $0.c * f) })
     }
 
+    /// Quantised vertex key for welding. 64-bit and clamped, so far-from-origin or corrupt coordinates can't overflow.
+    @inline(__always) static func weldKey(_ v: SIMD3<Float>, _ tolerance: Float) -> SIMD3<Int64> {
+        func q(_ x: Float) -> Int64 {
+            let d = (Double(x) / Double(tolerance)).rounded()
+            return d.isFinite ? Int64(Swift.max(-9e18, Swift.min(9e18, d))) : 0
+        }
+        return SIMD3<Int64>(q(v.x), q(v.y), q(v.z))
+    }
+
     /// Topology report: counts boundary / non-manifold edges after welding vertices.
     public struct Diagnostics: Sendable {
         public var triangleCount: Int
@@ -65,12 +74,9 @@ public struct Mesh: Sendable {
     }
 
     public func diagnostics(weldTolerance: Float = 1e-4) -> Diagnostics {
-        var index: [SIMD3<Int32>: Int32] = [:]
+        var index: [SIMD3<Int64>: Int32] = [:]
         index.reserveCapacity(triangles.count)
-        func key(_ v: SIMD3<Float>) -> SIMD3<Int32> {
-            SIMD3<Int32>(Int32((v.x / weldTolerance).rounded()), Int32((v.y / weldTolerance).rounded()),
-                         Int32((v.z / weldTolerance).rounded()))
-        }
+        func key(_ v: SIMD3<Float>) -> SIMD3<Int64> { Mesh.weldKey(v, weldTolerance) }
         func vid(_ v: SIMD3<Float>) -> Int32 {
             let k = key(v)
             if let i = index[k] { return i }
@@ -101,12 +107,11 @@ public struct Mesh: Sendable {
     /// Sharp and open edges (after welding) for outline rendering: edges whose two faces meet at more than `angle`
     /// degrees, plus edges with only one face. Each edge comes with the average normal of its faces.
     public func featureEdges(angle: Float = 25, weldTolerance: Float = 1e-3) -> [(a: SIMD3<Float>, b: SIMD3<Float>, n: SIMD3<Float>)] {
-        var index: [SIMD3<Int32>: Int32] = [:]
+        var index: [SIMD3<Int64>: Int32] = [:]
         var verts: [SIMD3<Float>] = []
         index.reserveCapacity(triangles.count)
         func vid(_ v: SIMD3<Float>) -> Int32 {
-            let k = SIMD3<Int32>(Int32((v.x / weldTolerance).rounded()), Int32((v.y / weldTolerance).rounded()),
-                                 Int32((v.z / weldTolerance).rounded()))
+            let k = Mesh.weldKey(v, weldTolerance)
             if let i = index[k] { return i }
             let i = Int32(verts.count)
             index[k] = i; verts.append(v)
@@ -154,6 +159,7 @@ public struct Mesh: Sendable {
             let n = t.normal
             guard n.z > 0.9995 else { continue }
             let z = Double(t.a.z + t.b.z + t.c.z) / 3
+            guard z.isFinite, abs(z) < 1e12 else { continue }
             let k = Int((z / Double(tolerance)).rounded())
             let prev = buckets[k] ?? (z, 0)
             buckets[k] = (prev.z, prev.area + t.area)
@@ -186,6 +192,7 @@ public struct Mesh: Sendable {
 
     /// All triangles coplanar with (and connected-by-normal to) the picked triangle, for face highlighting.
     public func coplanarGroup(of index: Int, angleTolerance: Float = 0.5) -> [Int] {
+        guard triangles.indices.contains(index) else { return [] }
         let ref = triangles[index]
         let n = ref.normal
         let d = simd_dot(n, ref.a)

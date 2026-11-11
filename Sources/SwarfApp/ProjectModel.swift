@@ -80,6 +80,7 @@ final class ProjectModel: ObservableObject {
     private var task: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
     private var lastPlacementKey = ""
+    private var generationToken = 0
 
     var job: Job { document.job }
 
@@ -158,20 +159,36 @@ final class ProjectModel: ObservableObject {
     // MARK: Editing with undo
 
     func updateJob(_ actionName: String = "Edit", _ body: (inout Job) -> Void) {
-        let old = document.job
-        var new = old
+        let before = undoState
+        var new = before.job
         body(&new)
-        guard new != old else { return }
+        guard new != before.job else { return }
         document.job = new
-        registerUndo(old: old, name: actionName)
+        registerUndo(before, name: actionName)
     }
 
-    private func registerUndo(old: Job, name: String) {
+    private struct UndoState {
+        let job: Job
+        let stl: Data?
+        let mesh: Mesh?
+        let name: String
+        let revision: Int
+    }
+
+    private var undoState: UndoState {
+        UndoState(job: document.job, stl: document.stlData, mesh: document.mesh, name: document.modelName, revision: document.modelRevision)
+    }
+
+    /// The inverse has to be registered while the undo is still running. That is how the undo manager knows it is a
+    /// redo; registered any later it becomes a new undo step and Redo stops working.
+    private func registerUndo(_ old: UndoState, name: String) {
         guard let um = undoManager else { return }
         um.registerUndo(withTarget: document) { [weak self] doc in
-            let cur = doc.job
-            doc.job = old
-            Task { @MainActor in self?.registerUndo(old: cur, name: name) }
+            MainActor.assumeIsolated {
+                let cur = self?.undoState
+                doc.restore(job: old.job, stl: old.stl, mesh: old.mesh, name: old.name, revision: old.revision)
+                if let cur { self?.registerUndo(cur, name: name) }
+            }
         }
         um.setActionName(name)
     }
@@ -206,9 +223,9 @@ final class ProjectModel: ObservableObject {
     func importSTL(url: URL) {
         do {
             let data = try Data(contentsOf: url)
-            let old = document.job
+            let before = undoState
             try document.setModel(data: data, name: url.deletingPathExtension().lastPathComponent, resetOrientation: true)
-            registerUndo(old: old, name: "Import Model")
+            registerUndo(before, name: "Import Model")
             requestView(.iso)
             runAutomationHooks()
         } catch {
@@ -246,7 +263,7 @@ final class ProjectModel: ObservableObject {
     }
 
     func pickFace(triangle: Int, up: Bool) {
-        guard let placed else { return }
+        guard let placed, placed.mesh.triangles.indices.contains(triangle) else { return }
         let n = placed.mesh.triangles[triangle].normal
         let nv = V3(Double(n.x), Double(n.y), Double(n.z))
         updateJob(up ? "Face Up" : "Face Down") { j in
@@ -260,11 +277,16 @@ final class ProjectModel: ObservableObject {
 
     func addOperation(_ kind: OperationKind) {
         let lib = ToolLibraryStore.shared.library
+        // The library can be empty (every tool deleted): fall back to the built-in starter tools.
+        func pick(_ k: ToolKind) -> Tool {
+            lib.closest(kind: k, diameter: 6) ?? lib.tools.first ?? ToolLibrary.starter.closest(kind: k, diameter: 6)
+                ?? ToolLibrary.starter.tools[0]
+        }
         let tool: Tool
         switch kind {
-        case .parallelFinish, .waterlineFinish: tool = lib.closest(kind: .ball, diameter: 6) ?? lib.tools[0]
-        case .vcarve: tool = lib.closest(kind: .vBit, diameter: 6) ?? lib.tools[0]
-        default: tool = lib.closest(kind: .flat, diameter: 6) ?? lib.tools[0]
+        case .parallelFinish, .waterlineFinish: tool = pick(.ball)
+        case .vcarve: tool = pick(.vBit)
+        default: tool = pick(.flat)
         }
         let op = CAMCore.Operation(kind: kind, tool: tool, material: .named(job.stock.materialID))
         updateJob("Add Operation") { $0.operations.append(op) }
@@ -414,8 +436,11 @@ final class ProjectModel: ObservableObject {
         }
         let j = job
         let key = makeContextKey(j)
+        // A cancelled run can finish after its replacement has started; only the newest run may clear the flag.
+        generationToken += 1
+        let token = generationToken
         generating = true
-        defer { generating = false }
+        defer { if token == generationToken { generating = false } }
         if context == nil || key != contextKey {
             let ctx = await Self.makeContext(mesh: mesh, job: j)
             if Task.isCancelled { return }
@@ -473,6 +498,29 @@ final class ProjectModel: ObservableObject {
 
     nonisolated static func generate(ctx: CAMContext, op: CAMCore.Operation, progress: @escaping @Sendable (Double) -> Void) async throws -> Toolpath {
         try ctx.generate(op, progress: progress)
+    }
+
+    /// Reasons the current toolpaths do not match the job. Shown before export so a failed, stale or
+    /// unfinished operation is never silently missing from the G-code.
+    var exportIssues: [String] {
+        var out: [String] = []
+        if generating { out.append("Toolpaths are still being calculated. Wait for them to finish, then export.") }
+        let contextStale = makeContextKey(job) != contextKey
+        for op in job.operations where op.enabled {
+            switch status[op.id] {
+            case .failed(let why):
+                out.append("\(op.name) failed and is not in the G-code: \(why)")
+            case .done where !contextStale && cache[op.id]?.key == opKey(op):
+                break
+            default:
+                if !generating { out.append("\(op.name) has changed since it was calculated. Generate the toolpaths again before exporting.") }
+            }
+        }
+        if job.operations.contains(where: { !$0.enabled }) && !job.operations.isEmpty {
+            let off = job.operations.filter { !$0.enabled }.map(\.name).joined(separator: ", ")
+            out.append("Switched off and not exported: \(off).")
+        }
+        return out
     }
 
     // MARK: Stats

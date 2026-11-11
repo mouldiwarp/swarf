@@ -3,19 +3,31 @@ import Foundation
 public enum STLError: Error, LocalizedError {
     case empty
     case malformed(String)
+    case unreadable(String)
 
     public var errorDescription: String? {
         switch self {
         case .empty: return "The STL file contains no triangles."
         case .malformed(let s): return "Malformed STL: \(s)"
+        case .unreadable(let s): return "The STL file could not be read: \(s)"
         }
     }
 }
 
 public enum STL {
     public static func read(url: URL) throws -> Mesh {
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let data: Data
+        do { data = try Data(contentsOf: url, options: .mappedIfSafe) } catch {
+            throw STLError.unreadable(error.localizedDescription)
+        }
         return try parse(data)
+    }
+
+    /// Largest coordinate (in file units) accepted. Anything beyond this is a corrupt file, not a model.
+    static let maxCoordinate: Float = 1e7
+
+    @inline(__always) static func isSane(_ v: SIMD3<Float>) -> Bool {
+        abs(v.x) <= maxCoordinate && abs(v.y) <= maxCoordinate && abs(v.z) <= maxCoordinate  // false for NaN / infinity
     }
 
     public static func parse(_ data: Data) throws -> Mesh {
@@ -51,11 +63,13 @@ public enum STL {
                                  raw.loadUnaligned(fromByteOffset: o + 8, as: Float.self))
                 }
                 let t = Triangle(v(off + 12), v(off + 24), v(off + 36))
-                if t.a.x.isFinite && t.b.x.isFinite && t.c.x.isFinite { tris.append(t) }
+                if isSane(t.a) && isSane(t.b) && isSane(t.c) { tris.append(t) }
                 off += 50
             }
         }
-        guard !tris.isEmpty else { throw STLError.empty }
+        guard !tris.isEmpty else {
+            throw STLError.malformed("every triangle has invalid or out-of-range coordinates")
+        }
         return Mesh(triangles: tris)
     }
 
@@ -77,7 +91,15 @@ public enum STL {
                 guard let (s, e) = token() else { throw STLError.malformed("unexpected end of file") }
                 var buf = [CChar](repeating: 0, count: e - s + 1)
                 for k in s..<e { buf[k - s] = CChar(bitPattern: p[k]) }
-                return Float(strtod(buf, nil))
+                let v: Double? = buf.withUnsafeBufferPointer { b in
+                    var end: UnsafeMutablePointer<CChar>? = nil
+                    let d = strtod(b.baseAddress!, &end)
+                    return end.map { $0 - UnsafeMutablePointer(mutating: b.baseAddress!) } == e - s ? d : nil
+                }
+                guard let v, abs(Float(v)) <= maxCoordinate else {
+                    throw STLError.malformed("invalid vertex coordinate “\(String(cString: buf).prefix(24))”")
+                }
+                return Float(v)
             }
             while let (s, e) = token() {
                 // match "vertex"
@@ -87,6 +109,7 @@ public enum STL {
             }
         }
         guard verts.count >= 3 else { throw STLError.empty }
+        guard verts.count % 3 == 0 else { throw STLError.malformed("the file is truncated (incomplete triangle)") }
         var tris = [Triangle]()
         tris.reserveCapacity(verts.count / 3)
         var k = 0

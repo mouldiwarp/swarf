@@ -12,7 +12,8 @@ public struct StockSimulator: Sendable {
     }
 
     public static func defaultResolution(for stockSize: V3) -> Double {
-        max(0.1, min(1.0, max(stockSize.x, stockSize.y) / 500))
+        // At most ~25 million cells, however large the stock.
+        max(0.1, min(1.0, max(stockSize.x, stockSize.y) / 500), (stockSize.x * stockSize.y / 25_000_000).squareRoot())
     }
 
     /// Radial profile lookup (offset vs. squared distance) for sub-cell exact stamping.
@@ -21,7 +22,7 @@ public struct StockSimulator: Sendable {
 
     mutating func profile(_ tool: Tool) -> Profile {
         if let p = profiles[tool.id] { return p }
-        let r2 = tool.radius * tool.radius
+        let r2 = max(1e-9, tool.radius * tool.radius)
         let n = 4096
         let table = (0...n).map { i -> Float in
             Float(tool.profileOffset(at: (Double(i) / Double(n) * r2).squareRoot()) ?? 0)
@@ -142,11 +143,13 @@ public struct StockSimulator: Sendable {
     /// With `stockTop`, the tool's effective radius at each depth is used (a V-bit engraving shallowly is narrow).
     public static func keepOutViolations(_ toolpaths: [Toolpath], regions: [Region], stockTop: Double? = nil) -> [String] {
         var out: [String] = []
+        let keepOuts = regions.filter { $0.enabled && $0.kind == .keepOut }
+        guard !keepOuts.isEmpty else { return out }
         for tp in toolpaths {
             let R = tp.tool.radius
-            for reg in regions where reg.enabled && reg.kind == .keepOut {
+            let pts = tp.tessellated(maxSegment: 0.5)
+            for reg in keepOuts {
                 var worst: (V3, Double)? = nil
-                let pts = tp.tessellated(maxSegment: 0.5)
                 for i in 1..<max(1, pts.count) where pts[i].1 != .rapid {
                     // check densely along the segment
                     let a = pts[i - 1].0, b = pts[i].0

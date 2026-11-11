@@ -21,6 +21,8 @@ final class SwarfDocument: ReferenceFileDocument {
     @Published private(set) var stlData: Data?
     @Published private(set) var mesh: Mesh?
     @Published var modelName: String
+    /// Changes whenever the model itself is replaced, so undo can tell a model swap from a plain job edit.
+    private(set) var modelRevision = 0
 
     init() {
         job = SwarfDocument.newJob()
@@ -39,27 +41,62 @@ final class SwarfDocument: ReferenceFileDocument {
     required init(configuration: ReadConfiguration) throws {
         let file = configuration.file
         guard let wrappers = file.fileWrappers,
-              let jobData = wrappers["job.json"]?.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
-        job = try JSONDecoder().decode(Job.self, from: jobData)
-        modelName = String(data: wrappers["name.txt"]?.regularFileContents ?? Data(), encoding: .utf8) ?? "Model"
+              let jobData = wrappers["job.json"]?.regularFileContents else {
+            throw Self.corrupt("The project has no job.json, so it is not a complete Swarf project.")
+        }
+        do {
+            job = try JSONDecoder().decode(Job.self, from: jobData)
+        } catch {
+            throw Self.corrupt("The job settings (job.json) could not be read. The project may be damaged or made by a newer version of Swarf.")
+        }
+        let name = String(data: wrappers["name.txt"]?.regularFileContents ?? Data(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        modelName = name.isEmpty ? "Model" : name
         if let stl = wrappers["model.stl"]?.regularFileContents {
+            do {
+                mesh = try STL.parse(stl)
+                stlData = stl
+            } catch {
+                throw Self.corrupt("The model inside the project (model.stl) could not be read: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func corrupt(_ reason: String) -> Error {
+        CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedFailureReasonErrorKey: reason])
+    }
+
+    /// Puts back an earlier model and job together (undo and redo of "Import Model").
+    func restore(job: Job, stl: Data?, mesh: Mesh?, name: String, revision: Int) {
+        if revision != modelRevision {
             stlData = stl
-            mesh = try STL.parse(stl)
+            modelName = name
+            modelRevision = revision
+            self.job = job
+            self.mesh = mesh
+        } else {
+            self.job = job
         }
     }
 
     func setModel(data: Data, name: String, resetOrientation: Bool) throws {
         let m = try STL.parse(data)
         stlData = data
-        mesh = m
         modelName = name
+        modelRevision = Self.nextRevision()
         if resetOrientation {
-            job.orientation = Orientation()
+            var j = job
+            j.orientation = Orientation()
             // Heuristic unit detection: tiny models are probably in inches.
             let size = m.bounds.size
-            if max(size.x, size.y, size.z) < 12 { job.orientation.scale = 25.4 }
+            if max(size.x, size.y, size.z) < 12 { j.orientation.scale = 25.4 }
+            job = j
         }
+        mesh = m
     }
+
+    private static var revisionCounter = 0
+    private static func nextRevision() -> Int { revisionCounter += 1; return revisionCounter }
 
     func snapshot(contentType: UTType) throws -> Snapshot { (job, stlData, modelName) }
 

@@ -400,6 +400,7 @@ extension CAMContext {
                 let l = Polyline.simplify(loop: l0, tolerance: 0.005)
                 var lp = l.points
                 if op.direction == .conventional { lp.reverse() }
+                guard lp.count >= 2 else { continue }
                 let good = lp.map { p -> Bool in
                     if T.sample(p) >= Grid2D.forbidThreshold { return false }
                     if slopeLimit > 0 && slopeAngle(T, p) < slopeLimit { return false }

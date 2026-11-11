@@ -56,10 +56,13 @@ struct ContentView: View {
         }
         .onChange(of: undoManager) { _, um in model.undoManager = um }
         .fileImporter(isPresented: $model.showImporter, allowedContentTypes: [.stlModel, .data]) { result in
-            if case .success(let url) = result {
+            switch result {
+            case .success(let url):
                 let ok = url.startAccessingSecurityScopedResource()
                 defer { if ok { url.stopAccessingSecurityScopedResource() } }
                 model.importSTL(url: url)
+            case .failure(let error):
+                model.errorMessage = "The file could not be opened: \(error.localizedDescription)"
             }
         }
         .sheet(isPresented: $model.showExport) { ExportView(model: model) }
@@ -298,6 +301,8 @@ struct SimulationBar: View {
 }
 
 func formatDuration(_ s: Double) -> String {
-    let m = Int(s) / 60, h = m / 60
-    return h > 0 ? "\(h) h \(m % 60) min" : "\(m) min \(Int(s) % 60) s"
+    guard s.isFinite else { return "unknown" }
+    let secs = Int(min(max(s, 0), 3.6e8))
+    let m = secs / 60, h = m / 60
+    return h > 0 ? "\(h) h \(m % 60) min" : "\(m) min \(secs % 60) s"
 }

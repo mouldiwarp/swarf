@@ -169,10 +169,49 @@ public struct PostProcessor: Sendable {
         self.profile = profile; self.origin = origin; self.safeZ = safeZ; self.jobName = jobName; self.stockSize = stockSize
     }
 
+    /// Plain printable ASCII on one line. Controllers and senders differ in how they treat other bytes, and a
+    /// line break inside a name would otherwise end the comment and turn the rest of the name into G-code.
+    static func ascii(_ s: String) -> String {
+        var out = ""
+        for ch in s.precomposedStringWithCanonicalMapping {
+            switch ch {
+            case "\u{2014}", "\u{2013}", "\u{2212}": out += "-"
+            case "\u{00D8}", "\u{2300}": out += "dia "
+            case "\u{00B0}": out += " deg"
+            case "\u{00D7}": out += "x"
+            case "\u{00B7}": out += "-"
+            case "\u{2018}", "\u{2019}", "\u{2032}": out += "'"
+            case "\u{201C}", "\u{201D}", "\u{2033}": out += "\""
+            case "\n", "\r", "\r\n", "\t": out += " "
+            default:
+                let folded = String(ch).folding(options: [.diacriticInsensitive, .widthInsensitive], locale: nil)
+                for u in folded.unicodeScalars {
+                    if u.value >= 0x20 && u.value < 0x7F { out.unicodeScalars.append(u) } else if u.value >= 0x7F { out += "?" }
+                }
+            }
+        }
+        return out
+    }
+
+    /// A file-name component: letters, digits, "-", "_" and "." only, never empty and never a dot name.
+    static func fileSafe(_ s: String, fallback: String) -> String {
+        let cleaned = ascii(s).replacingOccurrences(of: "\"", with: "in").replacingOccurrences(of: "/", with: "-")
+        var out = ""
+        for u in cleaned.unicodeScalars {
+            let ok = (u.value >= 0x30 && u.value <= 0x39) || (u.value >= 0x41 && u.value <= 0x5A) || (u.value >= 0x61 && u.value <= 0x7A)
+                || u == "-" || u == "_" || u == "."
+            out.unicodeScalars.append(ok ? u : "_")
+        }
+        while out.hasPrefix(".") { out.removeFirst() }
+        if out.count > 80 { out = String(out.prefix(80)) }
+        return out.contains(where: { $0.isLetter || $0.isNumber }) ? out : fallback
+    }
+
     func comment(_ s: String) -> String {
+        let t = Self.ascii(s)
         switch profile.commentStyle {
-        case .semicolon: return "; " + s
-        case .parentheses: return "(" + s.replacingOccurrences(of: "(", with: "[").replacingOccurrences(of: ")", with: "]") + ")"
+        case .semicolon: return "; " + t
+        case .parentheses: return "(" + t.replacingOccurrences(of: "(", with: "[").replacingOccurrences(of: ")", with: "]") + ")"
         }
     }
 
@@ -190,14 +229,14 @@ public struct PostProcessor: Sendable {
         t.replacingOccurrences(of: "{safeZ}", with: num(safeZ - origin.z))
             .replacingOccurrences(of: "{rpm}", with: num(rpm.rounded()))
             .replacingOccurrences(of: "{tool}", with: "\(tool?.number ?? 1)")
-            .replacingOccurrences(of: "{toolName}", with: tool?.name ?? "")
+            .replacingOccurrences(of: "{toolName}", with: Self.ascii(tool?.name ?? ""))
             .replacingOccurrences(of: "{rapid}", with: num(profile.rapidRate))
     }
 
     func dwell(_ s: Double) -> String {
         switch profile.dwellSyntax {
         case .pSeconds: return "G4 P\(num(s))"
-        case .pMillis: return "G4 P\(Int(s * 1000))"
+        case .pMillis: return "G4 P\(Int((s.isFinite ? min(max(s, 0), 3600) : 0) * 1000))"
         case .sSeconds: return "G4 S\(num(s))"
         }
     }
@@ -214,12 +253,11 @@ public struct PostProcessor: Sendable {
             }
         }
         if groups.isEmpty { return [] }
-        let base = jobName.replacingOccurrences(of: " ", with: "_")
+        let base = Self.fileSafe(jobName, fallback: "job")
         if profile.splitFilesPerTool && groups.count > 1 {
             return groups.enumerated().map { i, g in
                 let t = g[0].tool
-                let safeName = t.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\"", with: "in")
-                    .replacingOccurrences(of: " ", with: "_")
+                let safeName = Self.fileSafe(t.name, fallback: "tool")
                 return PostFile(name: "\(base)_\(i + 1)_T\(t.number)_\(safeName).\(profile.fileExtension)",
                                 content: emit(groups: [g], part: (i + 1, groups.count)), toolpathIDs: g.map(\.id))
             }
@@ -246,9 +284,12 @@ public struct PostProcessor: Sendable {
         let all = groups.flatMap { $0 }
         var bb = AABB3.empty
         for tp in all { for m in tp.moves { bb.include(m.to - origin) } }
-        out(comment(String(format: "Extents X%.2f..%.2f Y%.2f..%.2f Z%.2f..%.2f", bb.min.x, bb.max.x, bb.min.y, bb.max.y, bb.min.z, bb.max.z)))
+        if !bb.isEmpty {
+            out(comment(String(format: "Extents X%.2f..%.2f Y%.2f..%.2f Z%.2f..%.2f", bb.min.x, bb.max.x, bb.min.y, bb.max.y, bb.min.z, bb.max.z)))
+        }
         let secs = all.reduce(0.0) { $0 + $1.stats(rapidRate: profile.rapidRate, acceleration: profile.acceleration).seconds }
-        out(comment(String(format: "Estimated run time: %d min %02d s", Int(secs) / 60, Int(secs) % 60)))
+        let wholeSecs = secs.isFinite ? Int(min(max(secs, 0), 8.64e6)) : 0
+        out(comment(String(format: "Estimated run time: %d min %02d s", wholeSecs / 60, wholeSecs % 60)))
         for h in profile.header { out(fill(h)) }
 
         var lastFeed: Double = -1
@@ -268,12 +309,17 @@ public struct PostProcessor: Sendable {
                     if !firstGroup {
                         out("M5")
                         out("G0 Z\(num(safeZ - origin.z))")
-                        out("M291 P\"Insert T\(tool.number): \(tool.name). Re-zero Z, then press OK.\" R\"Tool change\" S3")
+                        // RepRapFirmware reads "" inside a quoted string as one literal quote.
+                        let shown = Self.ascii(tool.name).replacingOccurrences(of: "\"", with: "\"\"")
+                        out("M291 P\"Insert T\(tool.number): \(shown). Re-zero Z, then press OK.\" R\"Tool change\" S3")
                     }
                 case .none:
                     break
                 }
             }
+            // A tool change may leave the machine anywhere, so the first move of each tool states X, Y, Z and F in full.
+            cur = V3(.nan, .nan, .nan)
+            lastFeed = -1
             firstGroup = false
             out("G0 Z\(num(safeZ - origin.z))\(profile.g0NeedsFeed ? " F\(num(profile.rapidRate))" : "")")
             cur.z = safeZ
@@ -301,13 +347,14 @@ public struct PostProcessor: Sendable {
                         words.append("I" + num(c.x - prev.x))
                         words.append("J" + num(c.y - prev.y))
                     }
+                    // A move that goes nowhere is dropped before the feed is recorded, so its F word is not lost.
+                    if words.count == 1 { continue }
                     if m.kind == .rapid {
                         if profile.g0NeedsFeed { words.append("F" + num(profile.rapidRate)); lastFeed = -1 }
                     } else {
                         let f = min(m.feed, profile.maxFeed)
                         if abs(f - lastFeed) > 1e-6 { words.append("F" + num(f)); lastFeed = f }
                     }
-                    if !words.contains(where: { $0.hasPrefix("X") || $0.hasPrefix("Y") || $0.hasPrefix("Z") }) { continue }
                     out(words.joined(separator: " "))
                     cur = m.to
                     prev = m.to

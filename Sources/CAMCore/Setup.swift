@@ -92,15 +92,36 @@ public struct PlacedModel: Sendable {
 
     public var stockTop: Double { stockSize.z }
 
+    static let minStockDimension = 0.1
+
+    /// True when part of the model lies outside the stock block (manual stock sizes or offsets).
+    public var modelOutsideStock: Bool {
+        let e = 0.01
+        return modelBounds.min.x < -e || modelBounds.min.y < -e || modelBounds.min.z < -e
+            || modelBounds.max.x > stockSize.x + e || modelBounds.max.y > stockSize.y + e || modelBounds.max.z > stockSize.z + e
+    }
+
     public init(raw: Mesh, orientation: Orientation, stock: StockSetup) {
-        var m = raw.scaled(orientation.scale).transformed(rotation: orientation.rotation)
+        // Projects are plain JSON, so guard against values the UI would never produce.
+        let scale = orientation.scale.isFinite && orientation.scale > 0 ? orientation.scale : 1
+        func nonNegative(_ v: Double) -> Double { v.isFinite ? Swift.max(0, v) : 0 }
+        var stock = stock
+        stock.marginXY = nonNegative(stock.marginXY)
+        stock.extraTop = nonNegative(stock.extraTop)
+        stock.extraBottom = nonNegative(stock.extraBottom)
+        if !stock.modelOffset.x.isFinite || !stock.modelOffset.y.isFinite { stock.modelOffset = .zero }
+        var m = raw.scaled(scale).transformed(rotation: orientation.rotation)
         let b = m.bounds
-        let size: V3
+        var size: V3
         if stock.autoSize {
             size = V3(b.size.x + 2 * stock.marginXY, b.size.y + 2 * stock.marginXY,
                       b.size.z + stock.extraTop + stock.extraBottom)
         } else {
             size = stock.size
+        }
+        // A stock with no width, depth or thickness can't be gridded or machined.
+        for i in 0..<3 where !(size[i].isFinite && size[i] >= PlacedModel.minStockDimension) {
+            size[i] = PlacedModel.minStockDimension
         }
         let targetCenterXY = V2(size.x / 2, size.y / 2) + stock.modelOffset
         let dz: Double

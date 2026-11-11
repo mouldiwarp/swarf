@@ -4,11 +4,15 @@ import simd
 public enum CAMError: Error, LocalizedError {
     case noModel
     case nothingToCut(String)
+    case invalidSettings(String)
+    case internalError(String)
 
     public var errorDescription: String? {
         switch self {
         case .noModel: return "No model loaded."
         case .nothingToCut(let s): return s
+        case .invalidSettings(let s): return s
+        case .internalError(let s): return "Internal error: \(s) No toolpath was produced. Please report this."
         }
     }
 }
@@ -36,15 +40,29 @@ public final class CAMContext: @unchecked Sendable {
         self.job = job
         placed = PlacedModel(raw: raw, orientation: job.orientation, stock: job.stock)
         let s = placed.stockSize
-        let res = max(0.05, min(0.5, max(s.x, s.y) / job.quality.divisions))
-        let maxTool = job.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }.max() ?? 5
-        let margin = max(8, maxTool + 4) + 2 * res
+        let maxTool = job.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }
+            .filter(\.isFinite).max() ?? 5
+        let reach = min(CAMContext.maxGridMargin, max(8, maxTool + 4))
+        let res = CAMContext.gridResolution(stockSize: s, quality: job.quality, margin: reach)
+        let margin = reach + 2 * res
         let template = Grid2D(covering: V2(-margin, -margin), V2(s.x + margin, s.y + margin), res: res, fill: Grid2D.none)
         heights = Heightmap.rasterizeTop(placed.mesh, into: template)
         let h = heights
         let d = DistanceTransform.distance(width: h.width, height: h.height, res: res) { h.data[$0] > Grid2D.none / 2 }
         silhouetteDistance = Grid2D(like: h, data: d)
         flatLevels = placed.mesh.flatUpwardFaceHeights()
+    }
+
+    /// Widest border kept around the stock for cutter overhang and boundary margins (mm).
+    static let maxGridMargin = 250.0
+    /// Upper bound on height-field cells, so huge stock (or a model in the wrong units) can't exhaust memory.
+    static let maxGridCells = 36_000_000.0
+
+    /// Height-field cell size for a stock size: finer for small stock, never more cells than `maxGridCells`.
+    public static func gridResolution(stockSize s: V3, quality: ResolutionQuality, margin: Double = 8) -> Double {
+        let ideal = max(0.05, min(0.5, max(s.x, s.y) / quality.divisions))
+        let area = (s.x + 2 * margin) * (s.y + 2 * margin)
+        return max(ideal, (area / maxGridCells).squareRoot())
     }
 
     // MARK: Regions
@@ -140,7 +158,10 @@ public final class CAMContext: @unchecked Sendable {
 
     /// Tool-tip height field for an operation (cached).
     public func toolField(_ op: Operation) -> Grid2D {
-        let key = "\(op.tool.kind)|\(op.tool.diameter)|\(op.tool.cornerRadius)|\(op.tool.vAngle)|\(op.stockToLeaveXY)|\(op.stockToLeaveZ)|\(op.boundary)|\(op.boundaryMargin)|\(floorZ(op))|\(regions(for: op).map { "\($0.min)\($0.max)\($0.kind)\(String(describing: $0.protectBelowZ))" })"
+        // Everything obstacleHeights() and the dilation depend on. 3D strategies use a more conservative field than
+        // 2.5D ones, so the two must never share a cache entry.
+        let conservative = op.kind == .roughing || op.kind == .parallelFinish || op.kind == .waterlineFinish
+        let key = "\(conservative)|\(op.tool.kind)|\(op.tool.diameter)|\(op.tool.cornerRadius)|\(op.tool.vAngle)|\(op.tool.tipDiameter)|\(op.stockToLeaveXY)|\(op.stockToLeaveZ)|\(op.boundary)|\(op.boundaryMargin)|\(floorZ(op))|\(regions(for: op).map { "\($0.min)\($0.max)\($0.kind)\(String(describing: $0.protectBelowZ))" })"
         lock.lock()
         if let f = fieldCache[key] { lock.unlock(); return f }
         lock.unlock()
@@ -152,7 +173,35 @@ public final class CAMContext: @unchecked Sendable {
 
     // MARK: Generation
 
+    /// Rejects settings that would produce unusable G-code (F0 moves, zero-size cutters) or run away.
+    func validate(_ op: Operation) throws {
+        func bad(_ what: String) -> CAMError { .invalidSettings("\(op.name): \(what)") }
+        let t = op.tool, c = op.cutting
+        guard t.diameter.isFinite, t.diameter >= 0.05 else { throw bad("the tool diameter must be at least 0.05 mm.") }
+        guard t.diameter <= 2 * (CAMContext.maxGridMargin - 4) else { throw bad("the tool diameter is too large.") }
+        guard c.feed.isFinite, c.feed >= 1 else { throw bad("the feed rate must be at least 1 mm/min.") }
+        guard c.plunge.isFinite, c.plunge >= 1 else { throw bad("the plunge rate must be at least 1 mm/min.") }
+        guard c.rpm.isFinite, c.rpm >= 0 else { throw bad("the spindle speed is not valid.") }
+        guard c.stepdown.isFinite, c.stepdown > 0 else { throw bad("the stepdown must be greater than zero.") }
+        guard c.rampAngle.isFinite else { throw bad("the ramp angle is not valid.") }
+        let usesStepover = op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill
+        if usesStepover {
+            guard c.stepoverPercent.isFinite, c.stepoverPercent > 0, op.stepover >= 0.02 else {
+                throw bad("the stepover is too small (it must be at least 0.02 mm).")
+            }
+        }
+        for v in [op.stockToLeaveXY, op.stockToLeaveZ, op.boundaryMargin, op.bottomSkin, op.facingDepth, op.throughDepth,
+                  op.rasterAngle, op.slopeLimit, op.floorZ ?? 0, t.cornerRadius, t.vAngle, t.tipDiameter, t.fluteLength,
+                  op.tabs.width, op.tabs.height, op.tabs.minLoopLength] where !v.isFinite {
+            throw bad("one of the settings is not a valid number.")
+        }
+        guard safeZ.isFinite, job.safeHeight > 0 else {
+            throw CAMError.invalidSettings("The safe height must be greater than zero.")
+        }
+    }
+
     public func generate(_ op: Operation, progress: ProgressHandler? = nil) throws -> Toolpath {
+        try validate(op)
         let start = V3(0, 0, safeZ)
         var tp: Toolpath
         switch op.kind {
@@ -165,7 +214,16 @@ public final class CAMContext: @unchecked Sendable {
         case .cutout: tp = try cutout(op, progress: progress)
         }
         tp.start = start
+        // Last line of defence: a NaN or infinite coordinate must never reach a G-code file.
+        for m in tp.moves {
+            let ok = m.to.x.isFinite && m.to.y.isFinite && m.to.z.isFinite && m.feed.isFinite
+                && (m.center.map { $0.x.isFinite && $0.y.isFinite } ?? true) && (m.kind == .rapid || m.feed > 0)
+            guard ok else { throw CAMError.internalError("\(op.name) produced an invalid move.") }
+        }
         if tp.moves.isEmpty { tp.warnings.append("Operation produced no toolpath.") }
+        if placed.modelOutsideStock {
+            tp.warnings.append("Part of the model lies outside the stock. Check the stock size and the model position.")
+        }
         let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(job.stock.materialID))
         tp.warnings.append(contentsOf: advice.warnings)
         let deepest = tp.moves.map(\.to.z).min() ?? stockTop

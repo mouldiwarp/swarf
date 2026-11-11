@@ -17,6 +17,9 @@ public enum TopView {
 
     public static func render(stock: Grid2D, stockSize: V3, analysis: StockSimulator.Analysis?, toolpaths: [Toolpath],
                               regions: [Region] = [], pixelsPerMM: Double = 6) -> Image {
+        // Keep the image a sensible size whatever the stock size.
+        let longest = max(1, stockSize.x, stockSize.y)
+        let pixelsPerMM = max(0.001, min(pixelsPerMM, 6000 / longest))
         let W = Int(stockSize.x * pixelsPerMM) + 1, H = Int(stockSize.y * pixelsPerMM) + 1
         var img = Image(width: W, height: H, rgb: [UInt8](repeating: 0, count: W * H * 3))
         func put(_ x: Int, _ y: Int, _ c: SIMD3<Double>) {
@@ -59,9 +62,12 @@ public enum TopView {
             }
         }
         for r in regions {
-            let a = r.min * pixelsPerMM, b = r.max * pixelsPerMM
-            for x in Int(a.x)...Int(b.x) { put(x, Int(a.y), SIMD3(1, 0.2, 0.2)); put(x, Int(b.y), SIMD3(1, 0.2, 0.2)) }
-            for y in Int(a.y)...Int(b.y) { put(Int(a.x), y, SIMD3(1, 0.2, 0.2)); put(Int(b.x), y, SIMD3(1, 0.2, 0.2)) }
+            // Regions can be edited so min > max, or lie far outside the stock: order and clip them first.
+            func px(_ v: Double, _ limit: Int) -> Int { v.isFinite ? Int(max(-1, min(Double(limit), v * pixelsPerMM))) : -1 }
+            let x0 = px(min(r.min.x, r.max.x), W), x1 = px(max(r.min.x, r.max.x), W)
+            let y0 = px(min(r.min.y, r.max.y), H), y1 = px(max(r.min.y, r.max.y), H)
+            for x in x0...x1 { put(x, y0, SIMD3(1, 0.2, 0.2)); put(x, y1, SIMD3(1, 0.2, 0.2)) }
+            for y in y0...y1 { put(x0, y, SIMD3(1, 0.2, 0.2)); put(x1, y, SIMD3(1, 0.2, 0.2)) }
         }
         return img
     }

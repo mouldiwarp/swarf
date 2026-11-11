@@ -58,7 +58,8 @@ struct IntField: View {
     var body: some View {
         LabeledContent(title) {
             HStack(spacing: 4) {
-                TextField(title, value: $value, format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(width: 60)
+                TextField(title, value: Binding(get: { value }, set: { value = min(max($0, range.lowerBound), range.upperBound) }),
+                          format: .number).labelsHidden().multilineTextAlignment(.trailing).frame(width: 60)
                 Stepper("", value: $value, in: range).labelsHidden()
             }
         }
@@ -92,7 +93,8 @@ struct ModelInspector: View {
                 HStack {
                     Text("Scale")
                     Spacer()
-                    TextField("Scale", value: model.jobBinding(\.orientation.scale, name: "Scale"), format: .number.precision(.fractionLength(0...4)))
+                    TextField("Scale", value: Binding(get: { model.job.orientation.scale },
+                                                      set: { v in model.updateJob("Scale") { $0.orientation.scale = v.isFinite ? min(max(v, 0.001), 10000) : 1 } }), format: .number.precision(.fractionLength(0...4)))
                         .labelsHidden().frame(width: 80).multilineTextAlignment(.trailing)
                 }
                 HStack {
@@ -217,7 +219,7 @@ struct StockInspector: View {
                 }
             } footer: {
                 if let p = model.placed {
-                    let r = max(0.05, min(0.5, max(p.stockSize.x, p.stockSize.y) / model.job.quality.divisions))
+                    let r = CAMContext.gridResolution(stockSize: p.stockSize, quality: model.job.quality)
                     Text(String(format: "Grid cell: %.3f mm", r)).font(.caption)
                 }
             }

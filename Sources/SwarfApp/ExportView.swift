@@ -11,6 +11,8 @@ struct ExportView: View {
     @State private var files: [PostFile] = []
     @State private var warnings: [String] = []
     @State private var exported: String?
+    @State private var problem: String?
+    @State private var blocking = false
 
     var profile: MachineProfile { MachineProfile.find(machineID.isEmpty ? model.job.machineID : machineID) }
 
@@ -82,7 +84,11 @@ struct ExportView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
             }
-            if let e = exported { Label(e, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+            if let p = problem {
+                Label(p, systemImage: "xmark.octagon.fill").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            } else if let e = exported {
+                Label(e, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            }
             HStack {
                 Button("Setup Sheet (PDF)…") { exportSetupSheet() }
                 Button("Copy G-code") {
@@ -93,7 +99,7 @@ struct ExportView: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(files.count > 1 ? "Export \(files.count) Files…" : "Export…") { export() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(files.isEmpty)
+                    .disabled(files.isEmpty || blocking)
             }
         }
         .padding(20)
@@ -103,6 +109,8 @@ struct ExportView: View {
             rebuild()
         }
         .onChange(of: machineID) { _, _ in rebuild() }
+        .onChange(of: model.toolpathVersion) { _, _ in rebuild() }
+        .onChange(of: model.generating) { _, _ in rebuild() }
     }
 
     var preview: String {
@@ -113,10 +121,19 @@ struct ExportView: View {
     }
 
     func rebuild() {
-        guard let post = model.postProcessor(profile: profile) else { return }
+        exported = nil
+        problem = nil
+        blocking = model.generating
+        guard let post = model.postProcessor(profile: profile) else {
+            files = []
+            warnings = ["There is no model to export."]
+            return
+        }
         files = post.process(model.toolpaths)
-        selectedFile = 0
-        var w = post.validate(model.toolpaths)
+        if !files.indices.contains(selectedFile) { selectedFile = 0 }
+        var w = model.exportIssues
+        if files.isEmpty && w.isEmpty { w.append("There are no toolpaths to export. Add an operation first.") }
+        w += post.validate(model.toolpaths)
         w += model.toolpaths.flatMap { tp in tp.warnings.map { "\(tp.name): \($0)" } }
         w += StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions, stockTop: model.placed?.stockTop)
         warnings = w
@@ -131,7 +148,8 @@ struct ExportView: View {
             do {
                 try files[0].content.write(to: url, atomically: true, encoding: .utf8)
                 exported = "Saved \(url.lastPathComponent)"
-            } catch { model.errorMessage = error.localizedDescription }
+                problem = nil
+            } catch { problem = "Could not save \(url.lastPathComponent): \(error.localizedDescription)" }
         } else {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = true
@@ -139,11 +157,28 @@ struct ExportView: View {
             panel.canCreateDirectories = true
             panel.prompt = "Export Here"
             guard panel.runModal() == .OK, let dir = panel.url else { return }
+            // A folder picker gives no overwrite warning of its own, so ask before replacing files.
+            let existing = files.map(\.name).filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) }
+            if !existing.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = existing.count == 1 ? "Replace \(existing[0])?" : "Replace \(existing.count) existing files?"
+                alert.informativeText = "The folder \(dir.lastPathComponent) already has G-code with the same name" + (existing.count == 1 ? "." : "s.")
+                alert.addButton(withTitle: "Replace")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+            var written = 0
             do {
-                for f in files { try f.content.write(to: dir.appendingPathComponent(f.name), atomically: true, encoding: .utf8) }
+                for f in files {
+                    try f.content.write(to: dir.appendingPathComponent(f.name), atomically: true, encoding: .utf8)
+                    written += 1
+                }
                 exported = "Saved \(files.count) files to \(dir.lastPathComponent)"
+                problem = nil
                 NSWorkspace.shared.activateFileViewerSelecting([dir.appendingPathComponent(files[0].name)])
-            } catch { model.errorMessage = error.localizedDescription }
+            } catch {
+                problem = "Only \(written) of \(files.count) files were saved. Do not run this set: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -159,6 +194,7 @@ struct ExportView: View {
         let img = TopView.render(stock: sim.stock, stockSize: placed.stockSize, analysis: nil, toolpaths: [], regions: model.job.regions, pixelsPerMM: ppm)
         let sheet = SetupSheet(model: model, profile: profile, image: img.cgImage)
         let renderer = ImageRenderer(content: sheet.frame(width: 595, height: 842))
+        var wrote = false
         renderer.render { size, draw in
             var box = CGRect(origin: .zero, size: size)
             guard let ctx = CGContext(url as CFURL, mediaBox: &box, nil) else { return }
@@ -166,7 +202,13 @@ struct ExportView: View {
             draw(ctx)
             ctx.endPDFPage()
             ctx.closePDF()
+            wrote = true
         }
+        guard wrote, FileManager.default.fileExists(atPath: url.path) else {
+            problem = "Could not write the setup sheet to \(url.lastPathComponent). Check that the folder can be written to."
+            return
+        }
+        problem = nil
         exported = "Saved setup sheet"
         NSWorkspace.shared.open(url)
     }
@@ -187,7 +229,8 @@ struct SetupSheet: View {
     let image: CGImage?
 
     var body: some View {
-        let p = model.placed!
+        let stockSize = model.placed?.stockSize ?? .zero
+        let stockTop = model.placed?.stockTop ?? 0
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading) {
@@ -208,7 +251,7 @@ struct SetupSheet: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Stock").font(.headline)
-                    Text(String(format: "%.1f × %.1f × %.1f mm %@", p.stockSize.x, p.stockSize.y, p.stockSize.z, Material.named(model.job.stock.materialID).name))
+                    Text(String(format: "%.1f × %.1f × %.1f mm %@", stockSize.x, stockSize.y, stockSize.z, Material.named(model.job.stock.materialID).name))
                     Text("Work zero").font(.headline).padding(.top, 6)
                     Text("XY: \(model.job.origin.y.rawValue)-\(model.job.origin.x.rawValue) corner (red dot)")
                     Text("Z: \(model.job.origin.z == .stockTop ? "top of stock" : "bed / stock bottom")")
@@ -232,7 +275,7 @@ struct SetupSheet: View {
                         Text("T\(tp.tool.number) \(tp.tool.name)")
                         Text("\(Int(tp.rpm))")
                         Text("\(Int(op?.cutting.feed ?? 0))")
-                        Text(String(format: "%.1f", p.stockTop - s.bounds.min.z))
+                        Text(String(format: "%.1f", stockTop - s.bounds.min.z))
                         Text(formatDuration(s.seconds))
                     }
                 }

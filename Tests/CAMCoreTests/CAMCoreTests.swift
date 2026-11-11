@@ -567,3 +567,181 @@ import simd
         #expect(arcs[0].kind == .arcCCW)
     }
 }
+
+@Suite struct RobustnessTests {
+    /// Overwrites the Y of the first vertex of `triangle` (or of every triangle) with NaN in a binary STL.
+    func poisoned(_ mesh: Mesh, triangle: Int?) -> Data {
+        var data = STL.binaryData(mesh)
+        let nan = withUnsafeBytes(of: Float.nan) { Array($0) }
+        for t in 0..<mesh.triangles.count where triangle == nil || triangle == t {
+            let off = 84 + t * 50 + 12 + 4
+            data.replaceSubrange(off..<off + 4, with: nan)
+        }
+        return data
+    }
+
+    @Test func binarySTLSkipsBadTrianglesAndRejectsAllBad() throws {
+        let box = STL.box(V3(10, 10, 10))
+        #expect(try STL.parse(poisoned(box, triangle: 3)).triangles.count == 11)
+        #expect(throws: STLError.self) { try STL.parse(poisoned(box, triangle: nil)) }
+    }
+
+    @Test func asciiSTLReportsBadNumbersAndTruncation() {
+        let badNumber = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1.0abc 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n"
+        #expect(throws: STLError.self) { try STL.parse(Data(badNumber.utf8)) }
+        let truncated = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\n"
+        #expect(throws: STLError.self) { try STL.parse(Data(truncated.utf8)) }
+        let huge = "solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1e30 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid t\n"
+        #expect(throws: STLError.self) { try STL.parse(Data(huge.utf8)) }
+    }
+
+    @Test func missingFileGivesReadableError() {
+        #expect(throws: STLError.self) { try STL.read(url: URL(fileURLWithPath: "/nonexistent/swarf-test.stl")) }
+    }
+
+    @Test func invalidOperationSettingsAreRejectedBeforeCutting() {
+        let ctx = CAMContext(raw: STL.box(V3(40, 40, 10)), job: Job())
+        let good = Operation(kind: .roughing, tool: ToolLibrary.starter.tools[0])
+        var zeroFeed = good; zeroFeed.cutting.feed = 0
+        var nanStepdown = good; nanStepdown.cutting.stepdown = .nan
+        var noDiameter = good; noDiameter.tool.diameter = 0
+        var infiniteRPM = good; infiniteRPM.cutting.rpm = .infinity
+        for op in [zeroFeed, nanStepdown, noDiameter, infiniteRPM] {
+            #expect(throws: CAMError.self) { try ctx.generate(op) }
+        }
+    }
+
+    @Test func nonsensePlacementSettingsFallBackToSafeValues() {
+        var job = Job()
+        job.orientation.scale = 0
+        job.stock.marginXY = -.infinity
+        let placed = PlacedModel(raw: STL.box(V3(20, 20, 5)), orientation: job.orientation, stock: job.stock)
+        for v in [placed.stockSize.x, placed.stockSize.y, placed.stockSize.z] {
+            #expect(v.isFinite && v > 0)
+        }
+    }
+
+    @Test func gridStaysWithinTheCellBudgetForHugeStock() {
+        let s = V3(20000, 20000, 50)
+        let res = CAMContext.gridResolution(stockSize: s, quality: .fine)
+        #expect((s.x + 16) / res * (s.y + 16) / res <= CAMContext.maxGridCells * 1.001)
+        // Ordinary stock is unaffected by the cap.
+        #expect(CAMContext.gridResolution(stockSize: V3(300, 200, 20), quality: .normal) <= 0.5)
+    }
+
+    @Test func topViewDrawsRegionsThatAreInsideOutOrOffTheStock() {
+        let size = V3(40, 30, 10)
+        let sim = StockSimulator(stockSize: size, resolution: 0.5)
+        let regions = [Region(name: "inverted", min: V2(30, 20), max: V2(5, 5)),
+                       Region(name: "outside", min: V2(-500, -500), max: V2(-400, -400)),
+                       Region(name: "huge", min: V2(-1e6, -1e6), max: V2(1e6, 1e6))]
+        let img = TopView.render(stock: sim.stock, stockSize: size, analysis: nil, toolpaths: [], regions: regions)
+        #expect(img.width > 0 && img.rgb.count == img.width * img.height * 3)
+        let big = TopView.render(stock: sim.stock, stockSize: V3(5000, 3000, 10), analysis: nil, toolpaths: [], pixelsPerMM: 8)
+        #expect(max(big.width, big.height) <= 6100)
+    }
+
+    @Test func fusionImportRejectsOtherJSONAndSkipsUnusableTools() throws {
+        #expect(throws: ToolImportError.self) { try ToolLibrary.importFusion(Data("{\"hello\": 1}".utf8)) }
+        #expect(throws: ToolImportError.self) { try ToolLibrary.importFusion(Data("not json".utf8)) }
+        let lib = """
+        {"data": [
+          {"type": "flat end mill", "description": "zero", "geometry": {"DC": 0}},
+          {"type": "flat end mill", "description": "ok", "geometry": {"DC": 6, "LCF": -4, "NOF": 0},
+           "start-values": {"presets": [{"n": 0, "v_f": -100}]}}
+        ]}
+        """
+        let tools = try ToolLibrary.importFusion(Data(lib.utf8))
+        #expect(tools.count == 1)
+        #expect(tools[0].name == "ok")
+        #expect(tools[0].fluteLength > 0 && tools[0].flutes >= 1 && tools[0].defaults.feed > 0 && tools[0].defaults.rpm > 0)
+    }
+}
+
+@Suite struct PostSafetyTests {
+    func path(tool: Tool, name: String = "Op", from: V3, to: V3) -> Toolpath {
+        Toolpath(id: UUID(), name: name, kind: .pocket, tool: tool, rpm: 18000, start: V3(0, 0, 15),
+                 moves: [Move(.rapid, from), Move(.plunge, V3(from.x, from.y, 9), feed: 400), Move(.feed, to, feed: 1500),
+                         Move(.rapid, V3(to.x, to.y, 15))])
+    }
+
+    func motionLines(_ g: String, after marker: String) -> [Substring] {
+        let lines = g.split(separator: "\n")
+        guard let i = lines.firstIndex(where: { $0.contains(marker) }) else { return [] }
+        return lines[(i + 1)...].filter { ($0.hasPrefix("G0") || $0.hasPrefix("G1")) && ($0.contains("X") || $0.contains("Y")) }
+    }
+
+    @Test func firstMoveAfterAToolChangeStatesXAndY() {
+        // The second tool starts exactly where the first one stopped. The machine may have moved for the tool
+        // change, so the position must be stated again rather than assumed.
+        let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        let first = path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9))
+        let second = path(tool: b, from: V3(20, 20, 15), to: V3(30, 20, 9))
+        for profile in [MachineProfile.linuxcnc, .duetGeneric] {
+            let post = PostProcessor(profile: profile, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+            let g = post.process([first, second])[0].content
+            let marker = profile.toolChange == .m6 ? "T\(b.number) M6" : "M291"
+            let line = motionLines(g, after: marker).first
+            #expect(line != nil)
+            #expect(line?.contains("X20") == true && line?.contains("Y20") == true, "\(profile.id): \(line ?? "")")
+            // The feed is restated for the new tool as well.
+            let feeds = g.split(separator: "\n").drop(while: { !$0.contains(marker) }).filter { $0.hasPrefix("G1") }
+            #expect(feeds.first?.contains("F") == true)
+        }
+    }
+
+    @Test func feedChangeOnAZeroLengthMoveIsNotLost() {
+        let tool = ToolLibrary.starter.tools[0]
+        let tp = Toolpath(id: UUID(), name: "Op", kind: .pocket, tool: tool, rpm: 18000, start: V3(0, 0, 15),
+                          moves: [Move(.rapid, V3(10, 10, 15)), Move(.plunge, V3(10, 10, 9), feed: 400),
+                                  Move(.feed, V3(10, 10, 9), feed: 1500), Move(.feed, V3(30, 10, 9), feed: 1500)])
+        let post = PostProcessor(profile: .grbl, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+        let g = post.process([tp])[0].content
+        #expect(g.contains("G1 X30 F1500"), "\(g)")
+    }
+
+    @Test func rrfToolChangePromptEscapesQuotes() {
+        var a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        a.name = "First"; b.name = "1/4\" flat"
+        let post = PostProcessor(profile: .duetGeneric, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+        let g = post.process([path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9)), path(tool: b, from: V3(5, 5, 15), to: V3(9, 9, 9))])[0].content
+        let prompt = g.split(separator: "\n").first { $0.hasPrefix("M291") }
+        #expect(prompt?.contains("1/4\"\" flat.") == true, "\(prompt ?? "")")
+        // Quotes stay balanced, so the firmware sees one P string and one R string.
+        #expect((prompt?.filter { $0 == "\"" }.count ?? 1) % 2 == 0)
+    }
+
+    @Test func namesCannotInjectGCodeOrLeaveASCII() {
+        var tool = ToolLibrary.starter.tools[0]
+        tool.name = "Ø6 60° — bit\nM3 S99999"
+        let tp = path(tool: tool, name: "Pocket\r\nG0 Z-50 (deep)", from: V3(10, 10, 15), to: V3(20, 20, 9))
+        for profile in [MachineProfile.workbeeRRF, .grbl] {
+            let post = PostProcessor(profile: profile, origin: .zero, safeZ: 15, jobName: "Tëst\nG0 X999", stockSize: V3(50, 50, 10))
+            let g = post.process([tp])[0].content
+            #expect(g.unicodeScalars.allSatisfy { $0.value == 10 || ($0.value >= 0x20 && $0.value < 0x7F) })
+            for line in g.split(separator: "\n") {
+                #expect(!line.hasPrefix("G0 Z-50") && !line.hasPrefix("G0 X999") && !line.hasPrefix("M3 S99999"), "\(line)")
+            }
+            if profile.commentStyle == .parentheses {
+                // One comment per line: no nested or unbalanced brackets.
+                for line in g.split(separator: "\n") where line.hasPrefix("(") {
+                    #expect(line.filter { $0 == "(" }.count == 1 && line.filter { $0 == ")" }.count == 1 && line.hasSuffix(")"))
+                }
+            }
+        }
+    }
+
+    @Test func fileNamesStayInsideTheChosenFolder() {
+        var a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        a.name = "../../evil"; b.name = "a:b\\c*?"
+        let post = PostProcessor(profile: .grbl, origin: .zero, safeZ: 15, jobName: "../../etc/passwd", stockSize: V3(50, 50, 10))
+        let files = post.process([path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9)), path(tool: b, from: V3(5, 5, 15), to: V3(9, 9, 9))])
+        #expect(files.count == 2)
+        for f in files {
+            #expect(!f.name.hasPrefix(".") && !f.name.contains("/") && !f.name.contains(":") && !f.name.contains("\\"))
+            #expect(f.name.hasSuffix(".nc"))
+        }
+        let blank = PostProcessor(profile: .grbl, origin: .zero, safeZ: 15, jobName: " / ", stockSize: V3(50, 50, 10))
+        #expect(blank.process([path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9))])[0].name == "job.nc")
+    }
+}

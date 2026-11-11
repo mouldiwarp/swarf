@@ -211,13 +211,13 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
     // MARK: Fusion 360 tool library import (.json)
 
     public static func importFusion(_ data: Data) throws -> [Tool] {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let list = root["data"] as? [[String: Any]] else {
-            throw STLError.malformed("Not a Fusion 360 tool library")
+            throw ToolImportError.notAToolLibrary
         }
         var out: [Tool] = []
         for (i, t) in list.enumerated() {
-            guard let geo = t["geometry"] as? [String: Any], let dc = geo["DC"] as? Double else { continue }
+            guard let geo = t["geometry"] as? [String: Any], let dc = geo["DC"] as? Double, dc.isFinite, dc > 0 else { continue }
             let type = (t["type"] as? String ?? "").lowercased()
             let kind: ToolKind
             if type.contains("ball") { kind = .ball }
@@ -241,8 +241,33 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
                             flutes: geo["NOF"] as? Int ?? 2, fluteLength: (geo["LCF"] as? Double ?? 20) * unitScale,
                             stickout: (geo["LB"] as? Double ?? 30) * unitScale, defaults: cd)
             if kind == .vBit, let ta = geo["TA"] as? Double { tool.vAngle = ta * 2 }
+            // Imported values are not trusted: keep every number finite and in a usable range.
+            func sane(_ v: Double, _ fallback: Double, min lo: Double = 0) -> Double { v.isFinite && v > lo ? v : fallback }
+            tool.cornerRadius = min(Swift.max(0, tool.cornerRadius.isFinite ? tool.cornerRadius : 0), tool.diameter / 2)
+            tool.vAngle = tool.vAngle.isFinite && tool.vAngle >= 10 && tool.vAngle <= 170 ? tool.vAngle : 90
+            tool.flutes = Swift.max(1, tool.flutes)
+            tool.fluteLength = sane(tool.fluteLength, 20)
+            tool.stickout = sane(tool.stickout, 30)
+            tool.defaults.rpm = sane(tool.defaults.rpm, 18000)
+            tool.defaults.feed = sane(tool.defaults.feed, 1200)
+            tool.defaults.plunge = sane(tool.defaults.plunge, 300)
+            tool.defaults.stepdown = sane(tool.defaults.stepdown, tool.diameter * 0.3)
+            tool.defaults.stepoverPercent = Swift.min(100, sane(tool.defaults.stepoverPercent, 40))
             out.append(tool)
         }
+        if out.isEmpty { throw ToolImportError.noUsableTools }
         return out
+    }
+}
+
+public enum ToolImportError: Error, LocalizedError {
+    case notAToolLibrary
+    case noUsableTools
+
+    public var errorDescription: String? {
+        switch self {
+        case .notAToolLibrary: return "This is not a Swarf or Fusion 360 tool library (.json)."
+        case .noUsableTools: return "The library has no tools that Swarf can use (flat, ball, bull nose, V-bit or drill)."
+        }
     }
 }

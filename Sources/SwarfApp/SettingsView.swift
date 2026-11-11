@@ -87,11 +87,17 @@ struct ToolLibraryView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Button("Import…") { importTools() }
-                    Button("Export…") { exportTools() }
-                    Spacer()
-                    Button("Reset") { store.resetToStarter() }
+                VStack(alignment: .leading, spacing: 4) {
+                    if let note = store.lastError ?? message {
+                        Text(note).font(.caption).foregroundStyle(store.lastError != nil ? .orange : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack {
+                        Button("Import…") { importTools() }
+                        Button("Export…") { exportTools() }
+                        Spacer()
+                        Button("Reset") { store.resetToStarter() }
+                    }
                 }
                 .controlSize(.small)
                 .padding(8)
@@ -111,7 +117,13 @@ struct ToolLibraryView: View {
         let p = NSOpenPanel()
         p.allowedContentTypes = [.json]
         guard p.runModal() == .OK, let url = p.url else { return }
-        do { message = "Imported \(try store.importFile(url)) tools." } catch { message = error.localizedDescription }
+        store.lastError = nil
+        do {
+            let n = try store.importFile(url)
+            message = n == 0 ? "Nothing new to import: those tools are already in the library." : "Imported \(n) tool\(n == 1 ? "" : "s")."
+        } catch {
+            message = "Import failed: \(error.localizedDescription)"
+        }
     }
 
     func exportTools() {
@@ -120,7 +132,12 @@ struct ToolLibraryView: View {
         guard p.runModal() == .OK, let url = p.url else { return }
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try? enc.encode(store.library).write(to: url)
+        do {
+            try enc.encode(store.library).write(to: url, options: .atomic)
+            message = "Exported \(store.tools.count) tools to \(url.lastPathComponent)."
+        } catch {
+            message = "Export failed: \(error.localizedDescription)"
+        }
     }
 }
 

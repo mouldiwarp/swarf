@@ -4,7 +4,8 @@ import Foundation
 // swarf-cli <model.stl> [--machine id] [--out dir] [--material id] [--quality draft|normal|fine]
 //           [--lay-flat] [--rotate x|y|z:deg ...] [--ops facing,roughing,...] [--simulate]
 
-func usage() -> Never {
+func usage(_ reason: String? = nil) -> Never {
+    if let reason { FileHandle.standardError.write(Data("swarf-cli: \(reason)\n\n".utf8)) }
     print("""
     usage: swarf-cli <model.stl> [options]
       --machine <id>        post-processor (default: workbee-z1plus-rrf); --list-machines to see all
@@ -29,7 +30,8 @@ if args.contains("--list-machines") {
     for m in MachineProfile.builtIn { print("\(m.id.padding(toLength: 24, withPad: " ", startingAt: 0)) \(m.name)") }
     exit(0)
 }
-guard let path = args.first, !path.hasPrefix("--") else { usage() }
+if args.contains("--help") || args.contains("-h") { usage() }
+guard let path = args.first, !path.hasPrefix("--") else { usage(args.isEmpty ? nil : "the first argument must be the STL file") }
 args.removeFirst()
 
 var job = Job()
@@ -44,11 +46,22 @@ var vSettings = VCarveSettings()
 var i = 0
 while i < args.count {
     let a = args[i]
-    func next() -> String { i += 1; guard i < args.count else { usage() }; return args[i] }
+    func next() -> String { i += 1; guard i < args.count else { usage("\(a) needs a value") }; return args[i] }
     switch a {
-    case "--machine": job.machineID = next()
-    case "--material": job.stock.materialID = next()
-    case "--quality": job.quality = ResolutionQuality(rawValue: next()) ?? .normal
+    case "--machine":
+        let id = next()
+        guard MachineProfile.builtIn.contains(where: { $0.id == id }) else { usage("unknown machine \"\(id)\" (see --list-machines)") }
+        job.machineID = id
+    case "--material":
+        let id = next()
+        guard Material.library.contains(where: { $0.id == id }) else {
+            usage("unknown material \"\(id)\" (choose from \(Material.library.map(\.id).joined(separator: ", ")))")
+        }
+        job.stock.materialID = id
+    case "--quality":
+        let q = next()
+        guard let quality = ResolutionQuality(rawValue: q) else { usage("unknown quality \"\(q)\" (draft, normal or fine)") }
+        job.quality = quality
     case "--out": outDir = URL(fileURLWithPath: next())
     case "--simulate": simulate = true
     case "--png": pngPath = next(); simulate = true
@@ -56,18 +69,32 @@ while i < args.count {
     case "--keepout":
         // x0,y0,x1,y1 in stock space
         let v = next().split(separator: ",").compactMap { Double($0) }
-        guard v.count == 4 else { usage() }
-        keepOuts.append(Region(name: "Keep-out \(keepOuts.count + 1)", min: V2(v[0], v[1]), max: V2(v[2], v[3])))
+        guard v.count == 4, v.allSatisfy(\.isFinite) else { usage("--keepout needs four numbers: x0,y0,x1,y1") }
+        keepOuts.append(Region(name: "Keep-out \(keepOuts.count + 1)", min: V2(min(v[0], v[2]), min(v[1], v[3])), max: V2(max(v[0], v[2]), max(v[1], v[3]))))
     case "--lay-flat": layFlat = true
     case "--rotate":
         let parts = next().split(separator: ":")
-        guard parts.count == 2, let deg = Double(parts[1]) else { usage() }
-        let axis: V3 = parts[0] == "x" ? V3(1, 0, 0) : parts[0] == "y" ? V3(0, 1, 0) : V3(0, 0, 1)
+        let axes: [Substring: V3] = ["x": V3(1, 0, 0), "y": V3(0, 1, 0), "z": V3(0, 0, 1)]
+        guard parts.count == 2, let axis = axes[parts[0]], let deg = Double(parts[1]), deg.isFinite else {
+            usage("--rotate needs an axis and an angle, e.g. x:90")
+        }
         job.orientation.rotate(axis: axis, degrees: deg)
-    case "--vcarve-source": vSettings.source = VCarveSource(rawValue: next()) ?? .recesses
-    case "--vcarve-depth": vSettings.maxDepth = Double(next()) ?? 0
-    case "--ops": opsList = next().split(separator: ",").compactMap { OperationKind(rawValue: String($0)) }
-    default: usage()
+    case "--vcarve-source":
+        let v = next()
+        guard let source = VCarveSource(rawValue: v) else { usage("unknown V-carve source \"\(v)\" (recesses or silhouette)") }
+        vSettings.source = source
+    case "--vcarve-depth":
+        guard let d = Double(next()), d.isFinite, d >= 0 else { usage("--vcarve-depth needs a depth in mm, 0 or more") }
+        vSettings.maxDepth = d
+    case "--ops":
+        var kinds: [OperationKind] = []
+        for name in next().split(separator: ",") {
+            guard let k = OperationKind(rawValue: String(name)) else { usage("unknown operation \"\(name)\"") }
+            kinds.append(k)
+        }
+        guard !kinds.isEmpty else { usage("--ops needs at least one operation") }
+        opsList = kinds
+    default: usage("unknown option \(a)")
     }
     i += 1
 }
@@ -135,11 +162,19 @@ do {
             p.arguments = ["-s", "format", "png", ppm.path, "--out", png]
             p.standardOutput = FileHandle.nullDevice
             try p.run(); p.waitUntilExit()
-            try? FileManager.default.removeItem(at: ppm)
-            print("Preview: \(png)")
+            if p.terminationStatus == 0 {
+                try? FileManager.default.removeItem(at: ppm)
+                print("Preview: \(png)")
+            } else {
+                print("  ⚠︎ Could not convert the preview to PNG (sips exit \(p.terminationStatus)). The image was left as \(ppm.path)")
+            }
         }
     }
     print(String(format: "Done in %.2f s", Date().timeIntervalSince(t0)))
+    if !out.errors.isEmpty {
+        FileHandle.standardError.write(Data("swarf-cli: \(out.errors.count) operation(s) failed and are missing from the G-code\n".utf8))
+        exit(1)
+    }
 } catch {
     print("Error: \(error.localizedDescription)")
     exit(1)
