@@ -28,8 +28,7 @@ public enum JobTemplates {
         let t = traits(ctx)
         var ops: [Operation] = []
         let flat6 = library.closest(kind: .flat, diameter: 6) ?? ToolLibrary.starter.tools[0]
-        let flatSmall = library.closest(kind: .flat, diameter: 3.175) ?? flat6
-        let ball = library.closest(kind: .ball, diameter: 3) ?? flatSmall
+        let ball = library.closest(kind: .ball, diameter: 3) ?? flat6
         if t.topBelowStock {
             var f = Operation(kind: .facing, tool: flat6, material: material)
             f.facingDepth = min(ctx.stockTop - ctx.placed.modelBounds.max.z, 2)
@@ -51,11 +50,11 @@ public enum JobTemplates {
             w.cutting.stepdown = 0.3
             ops.append(w)
         } else if t.hasCavities || t.topBelowStock {
-            var p = Operation(kind: .pocket, tool: flatSmall, material: material)
+            var p = Operation(kind: .pocket, tool: flat6, material: material)
             p.name = "Pockets"
             ops.append(p)
         }
-        var c = Operation(kind: .cutout, tool: flatSmall, material: material)
+        var c = Operation(kind: .cutout, tool: flat6, material: material)
         c.name = "Cutout"
         c.tabs.enabled = true
         ops.append(c)

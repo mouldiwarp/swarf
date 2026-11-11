@@ -87,7 +87,6 @@ do {
             let tool: Tool = {
                 switch k {
                 case .parallelFinish, .waterlineFinish: return library.closest(kind: .ball, diameter: 3)!
-                case .cutout, .pocket: return library.closest(kind: .flat, diameter: 3.175)!
                 case .vcarve: return library.closest(kind: .vBit, diameter: 6.35)!
                 default: return library.closest(kind: .flat, diameter: 6)!
                 }

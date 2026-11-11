@@ -261,9 +261,7 @@ final class ProjectModel: ObservableObject {
         let tool: Tool
         switch kind {
         case .parallelFinish, .waterlineFinish: tool = lib.closest(kind: .ball, diameter: 3) ?? lib.tools[0]
-        case .cutout, .pocket: tool = lib.closest(kind: .flat, diameter: 3.175) ?? lib.tools[0]
         case .vcarve: tool = lib.closest(kind: .vBit, diameter: 6.35) ?? lib.tools[0]
-        case .drill: tool = lib.closest(kind: .drill, diameter: 6) ?? lib.closest(kind: .flat, diameter: 6) ?? lib.tools[0]
         default: tool = lib.closest(kind: .flat, diameter: 6) ?? lib.tools[0]
         }
         let op = CAMCore.Operation(kind: kind, tool: tool, material: .named(job.stock.materialID))

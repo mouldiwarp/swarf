@@ -100,7 +100,7 @@ extension CAMContext {
         var warnings: [String] = []
         if !otherSizes.isEmpty {
             let sizes = Set(otherSizes.map { ($0 * 10).rounded() / 10 }).sorted().map { String(format: "%.1f", $0) }.joined(separator: ", ")
-            warnings.append(String(format: "Skipped %d hole%@ that %@ match the Ø%.3g mm tool (Ø %@ mm). Use a pocket for larger holes.",
+            warnings.append(String(format: "Skipped %d hole%@ that %@ match the Ø%.3g mm tool (Ø %@ mm). The cutout cuts larger through holes; use a pocket for larger blind holes.",
                                    otherSizes.count, otherSizes.count == 1 ? "" : "s", otherSizes.count == 1 ? "doesn't" : "don't", D, sizes))
         }
         if blocked > 0 { warnings.append("Skipped \(blocked) hole\(blocked == 1 ? "" : "s") inside keep-out regions.") }
