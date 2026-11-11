@@ -13,7 +13,7 @@ func usage() -> Never {
       --lay-flat            auto-orient largest flat face down
       --rotate <axis:deg>   rotate model, e.g. x:90 (repeatable)
       --ops <list>          comma list of operations (default: full processing template):
-                            facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, cutout
+                            facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout
       --vcarve-source <s>   recesses (default) | silhouette
       --vcarve-depth <mm>   flat-bottom depth limit for V-carving (default: unlimited)
       --out <dir>           output directory (default: current)

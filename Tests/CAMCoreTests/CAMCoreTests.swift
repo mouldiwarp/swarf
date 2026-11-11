@@ -337,6 +337,85 @@ import simd
     }
 }
 
+@Suite struct DrillTests {
+    /// 60 × 20 × 10 plate with three holes in 20 mm cells: Ø6 through, Ø6 blind (floor at z 5), Ø10 through.
+    static func plate() -> Mesh {
+        var tris: [Triangle] = []
+        let holes: [(r: Float, floor: Float?)] = [(3, nil), (3, 5), (5, nil)]
+        let N = 96, top: Float = 10
+        func sq(_ a: Float) -> SIMD2<Float> {  // point on the 20 mm square at angle a
+            let d = SIMD2<Float>(cos(a), sin(a))
+            return d * (10 / max(abs(d.x), abs(d.y)))
+        }
+        for (k, hole) in holes.enumerated() {
+            let c = SIMD2<Float>(Float(k) * 20 + 10, 10)
+            for i in 0..<N {
+                let a0 = Float(i) / Float(N) * 2 * .pi, a1 = Float(i + 1) / Float(N) * 2 * .pi
+                let p0 = c + hole.r * SIMD2(cos(a0), sin(a0)), p1 = c + hole.r * SIMD2(cos(a1), sin(a1))
+                let s0 = c + sq(a0), s1 = c + sq(a1)
+                func v(_ p: SIMD2<Float>, _ z: Float) -> SIMD3<Float> { SIMD3(p.x, p.y, z) }
+                tris.append(Triangle(v(p0, top), v(s0, top), v(p1, top)))
+                tris.append(Triangle(v(p1, top), v(s0, top), v(s1, top)))
+                let fz = hole.floor ?? 0
+                tris.append(Triangle(v(p0, top), v(p1, fz), v(p0, fz)))
+                tris.append(Triangle(v(p0, top), v(p1, top), v(p1, fz)))
+                if let f = hole.floor { tris.append(Triangle(v(c, f), v(p0, f), v(p1, f))) }
+                tris.append(Triangle(v(p0, 0), v(p1, 0), v(s0, 0)))
+                tris.append(Triangle(v(p1, 0), v(s1, 0), v(s0, 0)))
+            }
+        }
+        return Mesh(triangles: tris)
+    }
+
+    @Test func findsRoundHoles() {
+        let ctx = CAMContext(raw: Self.plate(), job: Job())
+        let holes = ctx.detectHoles().sorted { $0.center.x < $1.center.x }
+        #expect(holes.count == 3)
+        guard holes.count == 3 else { return }
+        #expect(abs(holes[0].diameter - 6) < 0.3 && holes[0].floorZ == nil)
+        #expect(abs(holes[1].diameter - 6) < 0.3 && abs((holes[1].floorZ ?? 0) - (ctx.stockTop - 5)) < 0.05)
+        #expect(abs(holes[2].diameter - 10) < 0.3 && holes[2].floorZ == nil)
+    }
+
+    @Test func pecksMatchingHoles() throws {
+        var job = Job()
+        let tool = ToolLibrary.starter.tools[0]  // 6 mm flat
+        var op = Operation(kind: .drill, tool: tool, material: .named("mdf"))
+        op.cutting.stepdown = 2
+        job.operations = [op]
+        let ctx = CAMContext(raw: Self.plate(), job: job)
+        let tp = try ctx.generate(op)
+        // Two Ø6 holes drilled, the Ø10 one skipped with a warning.
+        let plunges = tp.moves.filter { $0.kind == .plunge }
+        let xy = Set(plunges.map { V2(($0.to.x * 10).rounded(), ($0.to.y * 10).rounded()) })
+        #expect(xy.count == 2)
+        #expect(tp.warnings.contains { $0.contains("Skipped 1 hole") })
+        // Every peck goes at most 2 mm past the deepest point reached so far at that hole.
+        let top = ctx.stockTop
+        var deepest: [V2: Double] = [:]
+        var p = tp.start
+        for m in tp.moves {
+            let k = V2((m.to.x * 10).rounded(), (m.to.y * 10).rounded())
+            if m.kind == .plunge {
+                let d = deepest[k] ?? top
+                #expect(d - m.to.z <= 2 + 1e-6)
+                #expect(abs(m.to.x - p.x) < 1e-9 && abs(m.to.y - p.y) < 1e-9)
+                deepest[k] = min(d, m.to.z)
+            } else if m.kind == .rapid && m.to.z < (deepest[k] ?? top) + 0.5 - 1e-6 {
+                Issue.record("Rapid into uncut material at \(m.to)")
+            }
+            p = m.to
+        }
+        let bottoms = deepest.values.sorted()
+        #expect(abs(bottoms[0] - -op.throughDepth) < 1e-6)  // through hole
+        #expect(abs(bottoms[1] - (top - 5)) < 0.05)        // blind hole floor
+        // Simulated stock: no gouges.
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.25)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed, tolerance: 0.1).gougeCells == 0)
+    }
+}
+
 @Suite struct ProjectTests {
     @Test func jobRoundTripsThroughJSON() throws {
         var job = Job()

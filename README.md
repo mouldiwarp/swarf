@@ -33,6 +33,7 @@ post-processors for most popular hobby machines.
 | 3D Finish – Parallel | Raster at any angle, optionally limited to shallow slopes |
 | 3D Finish – Waterline | Constant-Z contours, optionally limited to steep walls |
 | V-Carve | Engraves text and logos with a V-bit: sharp corners, depth follows stroke width, optional flat-bottom depth limit |
+| Drill (Peck) | Finds round holes in the model that match the tool diameter and pecks them: full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Expanded into plain G0/G1 moves, so it runs on any firmware |
 | Cutout (profile) | Through-cut with ramping multi-pass, internal holes first, **holding tabs** |
 
 - **Full Processing**: one click analyses the model and builds facing, roughing,
@@ -126,7 +127,7 @@ open build/Swarf.app
 ```
 
 Options: `--material`, `--quality draft|normal|fine`, `--lay-flat`, `--rotate x:90`,
-`--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,cutout`, `--keepout x0,y0,x1,y1`,
+`--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`, `--keepout x0,y0,x1,y1`,
 `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`.
 
 ## Safety
@@ -139,7 +140,6 @@ before your first cut. Swarf is provided under the MIT license **without warrant
 ## Roadmap
 
 - V-carve with a separate flat end mill for clearing wide areas
-- Drilling cycles with automatic hole detection
 - Rest machining (remaining material from the previous tool)
 - Flip / two-sided setups with dowel registration
 - Editable custom post-processors in the UI

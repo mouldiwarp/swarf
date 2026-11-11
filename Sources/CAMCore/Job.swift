@@ -1,7 +1,7 @@
 import Foundation
 
 public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable {
-    case facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, cutout
+    case facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout
     public var id: String { rawValue }
 
     public var displayName: String {
@@ -12,6 +12,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .parallelFinish: return "3D Finish – Parallel"
         case .waterlineFinish: return "3D Finish – Waterline"
         case .vcarve: return "V-Carve"
+        case .drill: return "Drill (Peck)"
         case .cutout: return "Cutout (Profile)"
         }
     }
@@ -24,6 +25,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .parallelFinish: return "line.3.horizontal"
         case .waterlineFinish: return "water.waves"
         case .vcarve: return "textformat"
+        case .drill: return "smallcircle.filled.circle"
         case .cutout: return "scissors"
         }
     }
@@ -90,6 +92,12 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
         get { vcarve ?? VCarveSettings() }
         set { vcarve = newValue }
     }
+    // Drilling (optional for older projects)
+    public var drilling: DrillSettings? = nil
+    public var drillSettings: DrillSettings {
+        get { drilling ?? DrillSettings() }
+        set { drilling = newValue }
+    }
     /// nil = every enabled region applies.
     public var regionIDs: [UUID]? = nil
 
@@ -117,6 +125,11 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
             cutting.stepoverPercent = 5
             boundary = .stock
             vcarve = VCarveSettings()
+        case .drill:
+            boundary = .stock
+            drilling = DrillSettings()
+            // Peck depth: about half the diameter clears chips well in wood with an end mill or drill.
+            cutting.stepdown = max(0.5, min(cutting.stepdown, tool.diameter * 0.5))
         case .cutout:
             boundary = .stock
         }

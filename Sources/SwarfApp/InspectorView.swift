@@ -385,11 +385,11 @@ struct OperationInspector: View {
                 NumberField(title: "Spindle", value: b(\.cutting.rpm), unit: "RPM", step: 500, range: 0...60000, digits: 0)
                 NumberField(title: "Feed", value: b(\.cutting.feed), unit: "mm/min", step: 50, range: 1...20000, digits: 0)
                 NumberField(title: "Plunge", value: b(\.cutting.plunge), unit: "mm/min", step: 25, range: 1...10000, digits: 0)
-                NumberField(title: op.kind == .waterlineFinish ? "Z step" : "Stepdown", value: b(\.cutting.stepdown), step: 0.1, range: 0.05...50)
-                if op.kind != .cutout && op.kind != .waterlineFinish {
+                NumberField(title: op.kind == .waterlineFinish ? "Z step" : op.kind == .drill ? "Peck depth" : "Stepdown", value: b(\.cutting.stepdown), step: 0.1, range: 0.05...50)
+                if op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill {
                     NumberField(title: "Stepover", value: b(\.cutting.stepoverPercent), unit: String(format: "%% (%.2f)", op.stepover), step: 1, range: 1...100, digits: 0)
                 }
-                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing && op.kind != .vcarve {
+                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing && op.kind != .vcarve && op.kind != .drill {
                     NumberField(title: "Ramp angle", value: b(\.cutting.rampAngle), unit: "°", step: 0.5, range: 0.5...45, digits: 1)
                 }
                 let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(model.job.stock.materialID))
@@ -398,7 +398,7 @@ struct OperationInspector: View {
                 Button("Reset to tool defaults") { model.setTool(op.tool, for: id, resetCutting: true) }.controlSize(.small)
             }
             kindSpecific(op)
-            if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve {
+            if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve && op.kind != .drill {
                 Section("Area") {
                     Picker("Boundary", selection: b(\.boundary)) {
                         ForEach(BoundaryMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
@@ -411,7 +411,7 @@ struct OperationInspector: View {
                     }
                 }
             }
-            if op.kind != .facing && op.kind != .vcarve {
+            if op.kind != .facing && op.kind != .vcarve && op.kind != .drill {
                 Section("Stock to leave") {
                     NumberField(title: "Radial (XY)", value: b(\.stockToLeaveXY), step: 0.05, range: 0...10)
                     if op.kind != .cutout { NumberField(title: "Axial (Z)", value: b(\.stockToLeaveZ), step: 0.05, range: 0...10) }
@@ -488,6 +488,25 @@ struct OperationInspector: View {
                      : "Carves the model's outline (e.g. an STL of lettering or a logo) into the stock top. The V-bit follows the centre line of each shape and goes deeper where it is wider, so edges and corners stay sharp. Stepdown sets the depth per pass.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Use keep-out or machine-only regions to limit what is engraved.").font(.caption).foregroundStyle(.secondary)
+            }
+        case .drill:
+            Section("Drilling") {
+                Picker("Retract", selection: b(\.drillSettings.retract)) {
+                    ForEach(PeckRetract.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if op.drillSettings.retract == .chipBreak {
+                    NumberField(title: "Chip-break lift", value: b(\.drillSettings.chipBreakLift), step: 0.1, range: 0.1...5)
+                }
+                NumberField(title: "Hole size match ±", value: b(\.drillSettings.diameterTolerance), step: 0.1, range: 0...20)
+                NumberField(title: "Through holes: below stock", value: b(\.throughDepth), step: 0.1, range: 0...5)
+                if op.tool.kind == .vBit {
+                    Label("Choose a drill or end mill for this operation.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                Text(String(format: "Finds round holes in the model within ±%.2g mm of the Ø%.3g mm tool and pecks each one: down by the peck depth at the plunge rate, then %@. Blind holes stop at their floor; through holes go below the stock. Drill before the cutout so parts are still held.",
+                            op.drillSettings.diameterTolerance, op.tool.diameter,
+                            op.drillSettings.retract == .full ? "back out above the stock to clear chips" : "a small lift to break the chip"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         case .cutout:
             Section("Cutout") {
