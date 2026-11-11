@@ -12,7 +12,10 @@ func usage() -> Never {
       --quality <q>         draft | normal | fine
       --lay-flat            auto-orient largest flat face down
       --rotate <axis:deg>   rotate model, e.g. x:90 (repeatable)
-      --ops <list>          comma list of operations (default: full processing template)
+      --ops <list>          comma list of operations (default: full processing template):
+                            facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, cutout
+      --vcarve-source <s>   recesses (default) | silhouette
+      --vcarve-depth <mm>   flat-bottom depth limit for V-carving (default: unlimited)
       --out <dir>           output directory (default: current)
       --simulate            run stock simulation and report gouges/leftover
       --png <file>          write a top-view preview (implies --simulate)
@@ -37,6 +40,7 @@ var layFlat = false
 var pngPath: String? = nil
 var pngPaths = true
 var keepOuts: [Region] = []
+var vSettings = VCarveSettings()
 var i = 0
 while i < args.count {
     let a = args[i]
@@ -60,6 +64,8 @@ while i < args.count {
         guard parts.count == 2, let deg = Double(parts[1]) else { usage() }
         let axis: V3 = parts[0] == "x" ? V3(1, 0, 0) : parts[0] == "y" ? V3(0, 1, 0) : V3(0, 0, 1)
         job.orientation.rotate(axis: axis, degrees: deg)
+    case "--vcarve-source": vSettings.source = VCarveSource(rawValue: next()) ?? .recesses
+    case "--vcarve-depth": vSettings.maxDepth = Double(next()) ?? 0
     case "--ops": opsList = next().split(separator: ",").compactMap { OperationKind(rawValue: String($0)) }
     default: usage()
     }
@@ -82,10 +88,13 @@ do {
                 switch k {
                 case .parallelFinish, .waterlineFinish: return library.closest(kind: .ball, diameter: 3)!
                 case .cutout, .pocket: return library.closest(kind: .flat, diameter: 3.175)!
+                case .vcarve: return library.closest(kind: .vBit, diameter: 6.35)!
                 default: return library.closest(kind: .flat, diameter: 6)!
                 }
             }()
-            return Operation(kind: k, tool: tool, material: material)
+            var op = Operation(kind: k, tool: tool, material: material)
+            if k == .vcarve { op.vcarveSettings = vSettings }
+            return op
         }
     } else {
         job.operations = JobTemplates.fullProcessing(probe, library: library, material: material)
@@ -114,10 +123,10 @@ do {
     if simulate {
         var sim = StockSimulator(stockSize: s, resolution: StockSimulator.defaultResolution(for: s))
         sim.run(out.toolpaths)
-        let a = sim.analyze(model: ctx.placed, tolerance: 0.1)
+        let a = sim.analyze(model: ctx.placed, tolerance: 0.1, engraved: out.toolpaths.compactMap(\.engraveMask))
         print(String(format: "Simulation: removed %.1f cm³, gouge cells %d (max %.3f mm), leftover cells %d (max %.2f mm)",
                      a.removedVolume / 1000, a.gougeCells, a.maxGouge, a.leftoverCells, a.maxLeftover))
-        for v in StockSimulator.keepOutViolations(out.toolpaths, regions: job.regions) { print("  ✖︎ \(v)") }
+        for v in StockSimulator.keepOutViolations(out.toolpaths, regions: job.regions, stockTop: ctx.stockTop) { print("  ✖︎ \(v)") }
         if let png = pngPath {
             let img = TopView.render(stock: sim.stock, stockSize: s, analysis: a, toolpaths: pngPaths ? out.toolpaths : [], regions: job.regions)
             let ppm = URL(fileURLWithPath: png).deletingPathExtension().appendingPathExtension("ppm")

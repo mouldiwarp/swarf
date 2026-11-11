@@ -105,12 +105,17 @@ final class ProjectModel: ObservableObject {
         jobChanged()
     }
 
-    /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES.
+    /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES,
+    /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template).
     private func runAutomationHooks() {
         let d = UserDefaults.standard
         guard d.bool(forKey: "SwarfAutoProcess"), document.mesh != nil, document.job.operations.isEmpty else { return }
         if d.bool(forKey: "SwarfAutoSimulate") { pendingAutoSim = true }
-        addFullProcessing()
+        if let list = d.string(forKey: "SwarfAutoOps") {
+            for k in list.split(separator: ",").compactMap({ OperationKind(rawValue: String($0)) }) { addOperation(k) }
+        } else {
+            addFullProcessing()
+        }
     }
 
     private var pendingAutoSim = false
@@ -224,6 +229,7 @@ final class ProjectModel: ObservableObject {
         switch kind {
         case .parallelFinish, .waterlineFinish: tool = lib.closest(kind: .ball, diameter: 3) ?? lib.tools[0]
         case .cutout, .pocket: tool = lib.closest(kind: .flat, diameter: 3.175) ?? lib.tools[0]
+        case .vcarve: tool = lib.closest(kind: .vBit, diameter: 6.35) ?? lib.tools[0]
         default: tool = lib.closest(kind: .flat, diameter: 6) ?? lib.tools[0]
         }
         let op = CAMCore.Operation(kind: kind, tool: tool, material: .named(job.stock.materialID))
@@ -525,6 +531,7 @@ extension Region {
 final class SimRunner: @unchecked Sendable {
     struct Segment { var a: V3; var b: V3; var tool: Tool; var cutting: Bool }
     let segments: [Segment]
+    let engraved: [Grid2D]
     let placed: PlacedModel
     private var sim: StockSimulator
     private var index = 0
@@ -544,6 +551,7 @@ final class SimRunner: @unchecked Sendable {
             }
         }
         segments = segs
+        engraved = toolpaths.compactMap(\.engraveMask)
         self.placed = placed
         sim = StockSimulator(stockSize: placed.stockSize, resolution: StockSimulator.defaultResolution(for: placed.stockSize))
     }
@@ -572,7 +580,7 @@ final class SimRunner: @unchecked Sendable {
                 if s.cutting { sim.cut(from: s.a, to: s.b, tool: s.tool) }
                 index += 1
             }
-            let analysis = analyze ? sim.analyze(model: placed, tolerance: 0.1) : nil
+            let analysis = analyze ? sim.analyze(model: placed, tolerance: 0.1, engraved: engraved) : nil
             let stock = sim.stock
             let toolPos: (V3, Tool)? = index > 0 && index <= segments.count ? (segments[index - 1].b, segments[index - 1].tool) : nil
             DispatchQueue.main.async { MainActor.assumeIsolated { completion(stock, analysis, toolPos) } }

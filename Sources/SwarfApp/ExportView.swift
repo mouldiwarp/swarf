@@ -117,7 +117,7 @@ struct ExportView: View {
         selectedFile = 0
         var w = post.validate(model.toolpaths)
         w += model.toolpaths.flatMap { tp in tp.warnings.map { "\(tp.name): \($0)" } }
-        w += StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions)
+        w += StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions, stockTop: model.placed?.stockTop)
         warnings = w
     }
 

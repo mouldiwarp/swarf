@@ -32,10 +32,17 @@ post-processors for most popular hobby machines.
 | 3D Roughing | Waterline offset clearing with ramp entries and stock-to-leave |
 | 3D Finish – Parallel | Raster at any angle, optionally limited to shallow slopes |
 | 3D Finish – Waterline | Constant-Z contours, optionally limited to steep walls |
+| V-Carve | Engraves text and logos with a V-bit: sharp corners, depth follows stroke width, optional flat-bottom depth limit |
 | Cutout (profile) | Through-cut with ramping multi-pass, internal holes first, **holding tabs** |
 
 - **Full Processing**: one click analyses the model and builds facing, roughing,
   steep/shallow finishing and a cutout with tabs, choosing tools from your library.
+- **V-carving**: engrave either the *recesses in the model's top face* (e.g. a plaque STL with
+  sunken lettering) or the *model's whole outline* (e.g. an STL of extruded text or a logo) into the
+  stock. The V-bit follows the medial axis of each shape at depth = half-width ÷ tan(½ angle), so the
+  cone's edge traces the outline exactly. Explicit branches run into every sharp corner. A depth limit
+  gives flat-bottomed letters, and stepdown splits deep carves into passes. Keep-out and machine-only
+  regions limit what gets engraved, and the simulator treats engraved areas as intentional, not gouges.
 - **Tabs**: count per loop (automatically moved onto straight sections) or click to place them.
   Rectangular or ramped/triangular, with settable width and height.
 - **Keep-out regions**: drag a box over any feature you don't want milled. The tool stays a full
@@ -117,7 +124,8 @@ open build/Swarf.app
 ```
 
 Options: `--material`, `--quality draft|normal|fine`, `--lay-flat`, `--rotate x:90`,
-`--ops facing,pocket,roughing,parallelFinish,waterlineFinish,cutout`, `--keepout x0,y0,x1,y1`.
+`--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,cutout`, `--keepout x0,y0,x1,y1`,
+`--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`.
 
 ## Safety
 
@@ -128,7 +136,7 @@ before your first cut. Swarf is provided under the MIT license **without warrant
 
 ## Roadmap
 
-- V-carve and engraving from model edges
+- V-carve with a separate flat end mill for clearing wide areas
 - Drilling cycles with automatic hole detection
 - Rest machining (remaining material from the previous tool)
 - Flip / two-sided setups with dowel registration

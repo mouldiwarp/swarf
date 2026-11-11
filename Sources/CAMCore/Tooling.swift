@@ -86,6 +86,20 @@ public struct Tool: Codable, Sendable, Identifiable, Equatable, Hashable {
         }
     }
 
+    /// Radius of the cut made at the stock surface when the tip is `depth` below it.
+    public func cuttingRadius(depth: Double) -> Double {
+        guard depth > 0 else { return 0 }
+        switch kind {
+        case .vBit, .drill:
+            let half = max(1, vAngle / 2) * .pi / 180
+            return min(radius, tipDiameter / 2 + depth * tan(half))
+        case .ball:
+            return depth >= radius ? radius : (max(0, depth * (2 * radius - depth))).squareRoot()
+        default:
+            return radius
+        }
+    }
+
     /// Chip load (mm/tooth) at the default feed.
     public var chipLoad: Double { defaults.feed / max(1, defaults.rpm) / Double(max(1, flutes)) }
 }

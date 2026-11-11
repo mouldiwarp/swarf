@@ -1,7 +1,7 @@
 import Foundation
 
 public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable {
-    case facing, pocket, roughing, parallelFinish, waterlineFinish, cutout
+    case facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, cutout
     public var id: String { rawValue }
 
     public var displayName: String {
@@ -11,6 +11,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .roughing: return "3D Roughing"
         case .parallelFinish: return "3D Finish – Parallel"
         case .waterlineFinish: return "3D Finish – Waterline"
+        case .vcarve: return "V-Carve"
         case .cutout: return "Cutout (Profile)"
         }
     }
@@ -22,6 +23,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .roughing: return "mountain.2"
         case .parallelFinish: return "line.3.horizontal"
         case .waterlineFinish: return "water.waves"
+        case .vcarve: return "textformat"
         case .cutout: return "scissors"
         }
     }
@@ -82,6 +84,12 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     public var throughDepth = 0.3
     public var cutHoles = true
     public var tabs = TabSettings()
+    // V-carve (optional so projects saved before V-carving existed still decode)
+    public var vcarve: VCarveSettings? = nil
+    public var vcarveSettings: VCarveSettings {
+        get { vcarve ?? VCarveSettings() }
+        set { vcarve = newValue }
+    }
     /// nil = every enabled region applies.
     public var regionIDs: [UUID]? = nil
 
@@ -105,6 +113,10 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
         case .waterlineFinish:
             cutting.stepdown = min(cutting.stepdown, 0.5)
             boundary = .silhouette; boundaryMargin = tool.radius
+        case .vcarve:
+            cutting.stepoverPercent = 5
+            boundary = .stock
+            vcarve = VCarveSettings()
         case .cutout:
             boundary = .stock
         }

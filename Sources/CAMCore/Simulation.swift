@@ -91,7 +91,8 @@ public struct StockSimulator: Sendable {
     }
 
     /// Compare the simulated stock with the model's top surface.
-    public func analyze(model: PlacedModel, tolerance: Double = 0.05) -> Analysis {
+    /// `engraved` masks (from V-carve toolpaths) mark cells where cutting below the model is intentional.
+    public func analyze(model: PlacedModel, tolerance: Double = 0.05, engraved: [Grid2D] = []) -> Analysis {
         let target = Heightmap.rasterizeTop(model.mesh, into: Grid2D(like: stock, data: [Float](repeating: Grid2D.none, count: stock.data.count)))
         var a = Analysis()
         a.deviation = [Float](repeating: .nan, count: stock.data.count)
@@ -103,6 +104,17 @@ public struct StockSimulator: Sendable {
                 a.removedVolume += Double(Float(stockSize.z) - stock.data[i]) * cellArea
                 let t = target.data[i]
                 guard t > Grid2D.none / 2 else { continue }
+                if !engraved.isEmpty {
+                    let p = stock.world(x, y)
+                    let r = max(stock.res, engraved[0].res)
+                    let hit = engraved.contains { m in
+                        [V2(0, 0), V2(r, 0), V2(-r, 0), V2(0, r), V2(0, -r)].contains { o in
+                            let v = m.nearest(p + o)
+                            return v > 0.5 && v < 2
+                        }
+                    }
+                    if hit { continue }
+                }
                 // Ignore cells on steep walls where pixelisation dominates.
                 var steep = false
                 for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
@@ -127,10 +139,11 @@ public struct StockSimulator: Sendable {
     }
 
     /// Checks whether any cutting move entered a keep-out region.
-    public static func keepOutViolations(_ toolpaths: [Toolpath], regions: [Region]) -> [String] {
+    /// With `stockTop`, the tool's effective radius at each depth is used (a V-bit engraving shallowly is narrow).
+    public static func keepOutViolations(_ toolpaths: [Toolpath], regions: [Region], stockTop: Double? = nil) -> [String] {
         var out: [String] = []
         for tp in toolpaths {
-            let r = tp.tool.radius
+            let R = tp.tool.radius
             for reg in regions where reg.enabled && reg.kind == .keepOut {
                 var worst: (V3, Double)? = nil
                 let pts = tp.tessellated(maxSegment: 0.5)
@@ -142,12 +155,13 @@ public struct StockSimulator: Sendable {
                         let p = a + (b - a) * (Double(k) / Double(n))
                         guard p.z < (reg.protectBelowZ ?? .infinity) - 0.01 else { continue }
                         let d = reg.distance(to: p.xy)
+                        let r = stockTop.map { tp.tool.cuttingRadius(depth: $0 - p.z) } ?? R
                         if d < r - 0.05 && d < (worst?.1 ?? .infinity) { worst = (p, d) }
                     }
                 }
                 if let (p, d) = worst {
                     out.append(String(format: "%@ enters keep-out region “%@” (tool edge %.2f mm inside, at X%.1f Y%.1f Z%.1f).",
-                                      tp.name, reg.name, r - d, p.x, p.y, p.z))
+                                      tp.name, reg.name, (stockTop.map { tp.tool.cuttingRadius(depth: $0 - p.z) } ?? R) - d, p.x, p.y, p.z))
                 }
             }
         }

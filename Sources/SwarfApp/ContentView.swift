@@ -276,7 +276,7 @@ struct SimulationBar: View {
                     Label(String(format: "Max leftover %.2f mm", a.maxLeftover), systemImage: "square.stack.3d.down.forward")
                         .foregroundStyle(.blue)
                     Label(String(format: "Removed %.1f cm³", a.removedVolume / 1000), systemImage: "trash")
-                    let kv = StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions)
+                    let kv = StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions, stockTop: model.placed?.stockTop)
                     if !kv.isEmpty {
                         Label("\(kv.count) keep-out violation(s)", systemImage: "nosign").foregroundStyle(.red).help(kv.joined(separator: "\n"))
                     }

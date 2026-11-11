@@ -185,6 +185,135 @@ import simd
     }
 }
 
+@Suite struct VCarveTests {
+    let lib = ToolLibrary.starter
+    var vbit90: Tool { lib.tools.first { $0.kind == .vBit && $0.vAngle == 90 }! }
+
+    /// An "L" of 4 mm wide strokes, 2 mm tall, standing on thicker stock.
+    func lJob(maxDepth: Double = 0) -> (Mesh, Job) {
+        let mesh = STL.merge([STL.box(V3(40, 4, 2)), STL.box(V3(4, 24, 2))])
+        var job = Job()
+        job.stock.extraBottom = 10
+        var op = Operation(kind: .vcarve, tool: vbit90, material: .named("mdf"))
+        op.vcarveSettings.source = .silhouette
+        op.vcarveSettings.maxDepth = maxDepth
+        op.cutting.stepdown = 5
+        job.operations = [op]
+        return (mesh, job)
+    }
+
+    /// Analytic distance from a point (model space) to the L's outline: >0 inside, <0 outside.
+    func signedEdgeDistance(_ p: V2) -> Double {
+        func rect(_ lo: V2, _ hi: V2) -> Double {
+            let dx = max(lo.x - p.x, p.x - hi.x), dy = max(lo.y - p.y, p.y - hi.y)
+            if dx <= 0 && dy <= 0 { return -max(dx, dy) }
+            return -(simd_length(V2(max(dx, 0), max(dy, 0))))
+        }
+        return max(rect(V2(0, 0), V2(40, 4)), rect(V2(0, 0), V2(4, 24)))
+    }
+
+    @Test func vcarveFollowsTheOutlineExactly() async throws {
+        let (mesh, job) = lJob()
+        let ctx = CAMContext(raw: mesh, job: job)
+        let out = await ctx.generateAll()
+        #expect(out.errors.isEmpty)
+        let tp = try #require(out.toolpaths.first)
+        let top = ctx.stockTop
+        // 4 mm stroke with a 90° bit bottoms out 2 mm deep.
+        let deepest = top - tp.moves.map(\.to.z).min()!
+        #expect(deepest > 1.8 && deepest < 2.02, "deepest \(deepest) res \(ctx.res)")
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run(out.toolpaths)
+        let off = ctx.placed.modelBounds.min.xy
+        var overcut = 0, missed = 0, wrongDepth = 0
+        for y in 0..<sim.stock.height {
+            for x in 0..<sim.stock.width {
+                let p = sim.stock.world(x, y)
+                let d = signedEdgeDistance(p - off)
+                let cut = top - Double(sim.stock[x, y])
+                if d < -0.15 && cut > 0.02 { overcut += 1 }
+                if d > 0.3 && cut < 0.1 { missed += 1 }
+                // in the straight part of the horizontal bar the groove is a clean 90° V
+                let q = p - off
+                if q.x > 10 && q.x < 36 && d > 0.2 && abs(cut - d) > 0.15 { wrongDepth += 1 }
+            }
+        }
+        #expect(overcut == 0)
+        #expect(missed == 0)
+        #expect(wrongDepth == 0)
+        let a = sim.analyze(model: ctx.placed, tolerance: 0.1, engraved: out.toolpaths.compactMap(\.engraveMask))
+        #expect(a.gougeCells == 0)
+    }
+
+    @Test func vcarveDepthLimitGivesFlatBottom() async throws {
+        let (mesh, job) = lJob(maxDepth: 0.8)
+        let ctx = CAMContext(raw: mesh, job: job)
+        let out = await ctx.generateAll()
+        let tp = try #require(out.toolpaths.first)
+        let top = ctx.stockTop
+        #expect(abs((top - tp.moves.map(\.to.z).min()!) - 0.8) < 1e-6)
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run(out.toolpaths)
+        let off = ctx.placed.modelBounds.min.xy
+        var overcut = 0, shallow = 0
+        for y in 0..<sim.stock.height {
+            for x in 0..<sim.stock.width {
+                let p = sim.stock.world(x, y)
+                let d = signedEdgeDistance(p - off)
+                let cut = top - Double(sim.stock[x, y])
+                if d < -0.15 && cut > 0.02 { overcut += 1 }
+                if d > 1.0 && cut < 0.8 - 0.35 { shallow += 1 }  // flat floor, small ridges allowed
+            }
+        }
+        #expect(overcut == 0)
+        #expect(shallow == 0)
+    }
+
+    @Test func vcarveEngravesRecessesOnly() async throws {
+        // 60x30 plaque, 6 mm tall, with a 30x4 slot sunk 2 mm into its top.
+        let mesh = STL.merge([
+            STL.box(V3(60, 30, 4)),
+            STL.box(V3(60, 13, 2), at: V3(0, 0, 4)), STL.box(V3(60, 13, 2), at: V3(0, 17, 4)),
+            STL.box(V3(10, 4, 2), at: V3(0, 13, 4)), STL.box(V3(20, 4, 2), at: V3(40, 13, 4)),
+        ])
+        var job = Job()
+        var op = Operation(kind: .vcarve, tool: vbit90, material: .named("mdf"))
+        op.cutting.stepdown = 1
+        job.operations = [op]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let out = await ctx.generateAll()
+        #expect(out.errors.isEmpty)
+        let tp = try #require(out.toolpaths.first)
+        #expect(Set(tp.moves.filter { $0.kind != .rapid }.map { ($0.to.z * 1000).rounded() }).count > 3)  // multiple depth passes
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run(out.toolpaths)
+        let a = sim.analyze(model: ctx.placed, tolerance: 0.1, engraved: out.toolpaths.compactMap(\.engraveMask))
+        #expect(a.gougeCells == 0)
+        let off = ctx.placed.modelBounds.min.xy
+        var outside = 0
+        for y in 0..<sim.stock.height {
+            for x in 0..<sim.stock.width {
+                let q = sim.stock.world(x, y) - off
+                let inSlot = q.x > 10 - 0.15 && q.x < 40 + 0.15 && q.y > 13 - 0.15 && q.y < 17 + 0.15
+                if !inSlot && Double(sim.stock[x, y]) < ctx.stockTop - 0.02 { outside += 1 }
+            }
+        }
+        #expect(outside == 0)
+        // Without a V-bit the operation explains itself.
+        var bad = job
+        bad.operations[0].tool = lib.closest(kind: .flat, diameter: 6)!
+        let r = await CAMContext(raw: mesh, job: bad).generateAll()
+        #expect(r.errors.count == 1)
+    }
+
+    @Test func keepOutCheckUsesEffectiveVBitRadius() {
+        var tool = vbit90
+        tool.tipDiameter = 0
+        #expect(abs(tool.cuttingRadius(depth: 0.5) - 0.5) < 1e-9)
+        #expect(abs(tool.cuttingRadius(depth: 10) - tool.radius) < 1e-9)
+    }
+}
+
 @Suite struct ProjectTests {
     @Test func jobRoundTripsThroughJSON() throws {
         var job = Job()

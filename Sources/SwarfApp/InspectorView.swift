@@ -386,7 +386,7 @@ struct OperationInspector: View {
                 if op.kind != .cutout && op.kind != .waterlineFinish {
                     NumberField(title: "Stepover", value: b(\.cutting.stepoverPercent), unit: String(format: "%% (%.2f)", op.stepover), step: 1, range: 1...100, digits: 0)
                 }
-                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing {
+                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing && op.kind != .vcarve {
                     NumberField(title: "Ramp angle", value: b(\.cutting.rampAngle), unit: "°", step: 0.5, range: 0.5...45, digits: 1)
                 }
                 let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(model.job.stock.materialID))
@@ -395,7 +395,7 @@ struct OperationInspector: View {
                 Button("Reset to tool defaults") { model.setTool(op.tool, for: id, resetCutting: true) }.controlSize(.small)
             }
             kindSpecific(op)
-            if op.kind != .facing && op.kind != .cutout {
+            if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve {
                 Section("Area") {
                     Picker("Boundary", selection: b(\.boundary)) {
                         ForEach(BoundaryMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
@@ -408,7 +408,7 @@ struct OperationInspector: View {
                     }
                 }
             }
-            if op.kind != .facing {
+            if op.kind != .facing && op.kind != .vcarve {
                 Section("Stock to leave") {
                     NumberField(title: "Radial (XY)", value: b(\.stockToLeaveXY), step: 0.05, range: 0...10)
                     if op.kind != .cutout { NumberField(title: "Axial (Z)", value: b(\.stockToLeaveZ), step: 0.05, range: 0...10) }
@@ -466,6 +466,25 @@ struct OperationInspector: View {
                 }
                 .pickerStyle(.segmented)
                 NumberField(title: "Only slopes above", value: b(\.slopeLimit), unit: "° (0=all)", step: 5, range: 0...90, digits: 0)
+            }
+        case .vcarve:
+            Section("V-Carve") {
+                Picker("Engrave", selection: b(\.vcarveSettings.source)) {
+                    ForEach(VCarveSource.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                Toggle("Limit depth (flat bottom)", isOn: Binding(get: { op.vcarveSettings.maxDepth > 0 },
+                                                                 set: { b(\.vcarveSettings.maxDepth).wrappedValue = $0 ? 2 : 0 }))
+                if op.vcarveSettings.maxDepth > 0 {
+                    NumberField(title: "Max depth", value: b(\.vcarveSettings.maxDepth), step: 0.1, range: 0.05...50)
+                }
+                if op.tool.kind != .vBit {
+                    Label("Choose a V-bit for this operation.", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                Text(op.vcarveSettings.source == .recesses
+                     ? "Engraves areas that sit below the model's top face (e.g. text sunk into a plaque). The V-bit follows the centre line of each shape and goes deeper where it is wider, so edges and corners stay sharp. Stepdown sets the depth per pass."
+                     : "Carves the model's outline (e.g. an STL of lettering or a logo) into the stock top. The V-bit follows the centre line of each shape and goes deeper where it is wider, so edges and corners stay sharp. Stepdown sets the depth per pass.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Use keep-out or machine-only regions to limit what is engraved.").font(.caption).foregroundStyle(.secondary)
             }
         case .cutout:
             Section("Cutout") {

@@ -160,6 +160,7 @@ public final class CAMContext: @unchecked Sendable {
         case .roughing, .pocket: tp = try clearing(op, progress: progress)
         case .parallelFinish: tp = try parallel(op, progress: progress)
         case .waterlineFinish: tp = try waterline(op, progress: progress)
+        case .vcarve: tp = try vcarve(op, progress: progress)
         case .cutout: tp = try cutout(op, progress: progress)
         }
         tp.start = start
@@ -167,6 +168,10 @@ public final class CAMContext: @unchecked Sendable {
         let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(job.stock.materialID))
         tp.warnings.append(contentsOf: advice.warnings)
         let deepest = tp.moves.map(\.to.z).min() ?? stockTop
+        if op.kind != .cutout && deepest < -0.01 {
+            tp.warnings.append(String(format: "Cuts %.2f mm below the stock bottom%@.", -deepest,
+                                      op.kind == .vcarve ? " — set a depth limit or use a wider-angle V-bit" : ""))
+        }
         if stockTop - deepest > op.tool.fluteLength + 0.01 {
             tp.warnings.append(String(format: "Cut depth %.1f mm exceeds the tool's flute length (%.1f mm).", stockTop - deepest, op.tool.fluteLength))
         }
