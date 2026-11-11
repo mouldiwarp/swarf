@@ -129,7 +129,7 @@ final class ProjectModel: ObservableObject {
 
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES,
     /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
-    /// -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box).
+    /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box).
     private func runAutomationHooks() {
         let d = UserDefaults.standard
         if document.mesh != nil, let v = d.string(forKey: "SwarfView"), let preset = ViewPreset(rawValue: v) {
@@ -146,6 +146,9 @@ final class ProjectModel: ObservableObject {
         } else {
             addFullProcessing()
         }
+        let ops = document.job.operations
+        let n = d.integer(forKey: "SwarfSelectOp")
+        if n >= 1, n <= ops.count { selection = .operation(ops[n - 1].id) }
     }
 
     private var pendingAutoSim = false

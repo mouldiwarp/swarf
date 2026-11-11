@@ -423,6 +423,8 @@ struct OperationInspector: View {
             }
         }
         .formStyle(.grouped)
+        // Developer hook for automated screenshots: -SwarfInspectorBottom YES opens the inspector scrolled to the end.
+        .defaultScrollAnchor(UserDefaults.standard.bool(forKey: "SwarfInspectorBottom") ? .bottom : .top)
     }
 
     @ViewBuilder func statusRow(_ op: CAMCore.Operation) -> some View {
