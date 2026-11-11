@@ -337,6 +337,60 @@ import simd
     }
 }
 
+@Suite struct CutoutFinishTests {
+    @Test func roughsWithAllowanceThenFinishesAtFourTimesStepdown() async throws {
+        var job = Job()
+        job.quality = .draft
+        var op = Operation(kind: .cutout, tool: ToolLibrary.starter.tools[0], material: .named("mdf"))
+        op.cutting.stepdown = 2
+        op.tabs.countPerLoop = 4
+        job.operations = [op]
+        #expect(op.finishStepdown == 8)
+        let ctx = CAMContext(raw: STL.box(V3(60, 40, 18)), job: job)
+        let tp = try ctx.generate(op)
+        let R = op.tool.radius
+        // Classify cutting moves below the tab height by their distance from the part.
+        var roughZ = Set<Double>(), finishZ = Set<Double>()
+        var prevZ = Double.nan
+        for m in tp.moves {
+            defer { prevZ = m.to.z }
+            guard m.kind == .feed && abs(m.to.z - op.tabs.height) > 1e-6 && m.to.z < 17.9 else { continue }
+            let d = Double(ctx.silhouetteDistance.sample(m.to.xy))
+            let z = (m.to.z * 100).rounded() / 100
+            if abs(d - (R + 0.5)) < 0.2 { if m.to.z == prevZ { roughZ.insert(z) } }
+            else if abs(d - R) < 0.2 { if m.to.z == prevZ { finishZ.insert(z) } }
+            else { Issue.record("Cut at unexpected offset \(d)") }
+        }
+        // Roughing: 18.3 mm in 2 mm-or-less passes → 10 levels. Finishing: 8 mm-or-less → 3 levels.
+        #expect(roughZ.count == 10)
+        #expect(finishZ.count == 3)
+        #expect(finishZ.min() == -0.3 && roughZ.min() == -0.3)
+        // Roughing all comes before finishing (single outer loop).
+        let firstFinish = tp.moves.firstIndex { $0.kind == .feed && abs(Double(ctx.silhouetteDistance.sample($0.to.xy)) - R) < 0.2 && $0.to.z < 17 }!
+        let lastRough = tp.moves.lastIndex { $0.kind == .feed && abs(Double(ctx.silhouetteDistance.sample($0.to.xy)) - (R + 0.5)) < 0.2 }!
+        #expect(lastRough < firstFinish)
+        // Tabs survive in both passes: the 4 tabs reach tab height on the finished outline.
+        let finishAtTab = tp.moves.filter { $0.kind == .feed && abs(Double(ctx.silhouetteDistance.sample($0.to.xy)) - R) < 0.2 && abs($0.to.z - op.tabs.height) < 1e-6 }
+        #expect(finishAtTab.count >= 4)
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.25)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed, tolerance: 0.1).gougeCells == 0)
+    }
+
+    @Test func finishCanBeTurnedOff() throws {
+        var op = Operation(kind: .cutout, tool: ToolLibrary.starter.tools[0], material: .named("mdf"))
+        op.cutoutFinishSettings.enabled = false
+        op.finishStepdown = 5
+        #expect(op.finishStepdown == 5)
+        var job = Job(); job.quality = .draft; job.operations = [op]
+        let ctx = CAMContext(raw: STL.box(V3(60, 40, 18)), job: job)
+        let tp = try ctx.generate(op)
+        for m in tp.moves where m.kind == .feed && m.to.z < 17 {
+            #expect(abs(Double(ctx.silhouetteDistance.sample(m.to.xy)) - op.tool.radius) < 0.2)
+        }
+    }
+}
+
 @Suite struct DrillTests {
     /// 60 × 20 × 10 plate with three holes in 20 mm cells: Ø6 through, Ø6 blind (floor at z 5), Ø10 through.
     static func plate() -> Mesh {

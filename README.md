@@ -34,7 +34,7 @@ post-processors for most popular hobby machines.
 | 3D Finish – Waterline | Constant-Z contours, optionally limited to steep walls |
 | V-Carve | Engraves text and logos with a V-bit: sharp corners, depth follows stroke width, optional flat-bottom depth limit |
 | Drill (Peck) | Finds round holes in the model that match the tool diameter and pecks them: full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Expanded into plain G0/G1 moves, so it runs on any firmware |
-| Cutout (profile) | Through-cut with ramping multi-pass, internal holes first, **holding tabs** |
+| Cutout (profile) | Through-cut with ramping multi-pass, internal holes first, **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes the last skin at a deeper cut (default 4× the roughing stepdown) for a clean edge |
 
 - **Full Processing**: one click analyses the model and builds facing, roughing,
   steep/shallow finishing and a cutout with tabs, choosing tools from your library.

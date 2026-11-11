@@ -434,8 +434,9 @@ extension CAMContext {
 
     // MARK: Cutout with tabs
 
-    public func cutoutLoops(_ op: Operation) -> [Loop] {
-        let r = Float(op.tool.radius + op.stockToLeaveXY)
+    /// Cutout outlines offset by the tool radius + XY stock to leave + `extra` (roughing allowance).
+    public func cutoutLoops(_ op: Operation, extra: Double = 0) -> [Loop] {
+        let r = Float(op.tool.radius + op.stockToLeaveXY + extra)
         let g = silhouetteDistance
         let loops = Contours.isolines(g, levels: [r])[0]
         let edge = g.res * 2
@@ -450,53 +451,83 @@ extension CAMContext {
         }
     }
 
+    /// Tab centres (XY) on the finished outlines, so roughing and finishing loops leave the same tabs.
+    func tabAnchors(_ op: Operation, finishLoops: [Loop]) -> [V2] {
+        let tabs = op.tabs
+        guard tabs.enabled else { return [] }
+        let R = op.tool.radius
+        var out: [V2] = []
+        for loop in finishLoops {
+            let path = ClosedPath(loop)
+            let P = path.perimeter
+            guard P >= tabs.minLoopLength else { continue }
+            if !tabs.manualPositions.isEmpty {
+                let maxDist = max(10, R * 4)
+                for m in tabs.manualPositions {
+                    let q = path.point(at: path.param(nearest: m))
+                    if q.dist(m) < maxDist { out.append(q) }
+                }
+            } else {
+                let count = max(1, tabs.countPerLoop)
+                let spacing = P / Double(count)
+                for i in 0..<count {
+                    let nominal = (Double(i) + 0.5) * spacing
+                    // Prefer straight stretches within ±25% of the spacing.
+                    var best = nominal, bestScore = Double.infinity
+                    let search = spacing * 0.25
+                    var s = nominal - search
+                    while s <= nominal + search {
+                        let score = path.turning(at: s, window: tabs.width / 2 + R) + abs(s - nominal) / max(1, spacing) * 0.05
+                        if score < bestScore { bestScore = score; best = s }
+                        s += max(0.5, search / 10)
+                    }
+                    out.append(path.point(at: (best + P).truncatingRemainder(dividingBy: P)))
+                }
+            }
+        }
+        return out
+    }
+
     func cutout(_ op: Operation, progress: ProgressHandler?) throws -> Toolpath {
         var b = builder(op)
-        var loops = cutoutLoops(op)
-        guard !loops.isEmpty else { throw CAMError.nothingToCut("No outline found for the cutout.") }
-        // Holes first, then outer profiles.
-        loops.sort { ($0.signedArea > 0 ? 0 : 1) < ($1.signedArea > 0 ? 0 : 1) }
+        let holesFirst: (Loop, Loop) -> Bool = { ($0.signedArea > 0 ? 0 : 1) < ($1.signedArea > 0 ? 0 : 1) }
+        let finishLoops = cutoutLoops(op).sorted(by: holesFirst)
+        guard !finishLoops.isEmpty else { throw CAMError.nothingToCut("No outline found for the cutout.") }
+        let fin = op.cutoutFinishSettings
+        let allowance = max(0, fin.allowance)
+        let finishing = fin.enabled && allowance > 1e-6
         let zTop = stockTop
         let zBot = -op.throughDepth
-        let passZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.cutting.stepdown)
+        let roughZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.cutting.stepdown)
+        let finishZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.finishStepdown)
+        let anchors = tabAnchors(op, finishLoops: finishLoops)
+
+        // Holes before outer profiles (parts stay held longest); within each, roughing before finishing.
+        var jobs: [(loop: Loop, levels: [Double], snap: Double)] = []
+        let roughLoops = finishing ? cutoutLoops(op, extra: allowance).sorted(by: holesFirst) : finishLoops
+        for hole in [true, false] {
+            for l in roughLoops where (l.signedArea > 0) == hole { jobs.append((l, roughZ, finishing ? allowance + 1 : max(10, op.tool.radius * 4))) }
+            if finishing {
+                for l in finishLoops where (l.signedArea > 0) == hole { jobs.append((l, finishZ, 1)) }
+            }
+        }
+
         let ramp = max(0.5, op.cutting.rampAngle) * .pi / 180
         let R = op.tool.radius
         let tabs = op.tabs
         let tabTop = tabs.height
         var warned = false
-        for (li, l0) in loops.enumerated() {
+        for (li, job) in jobs.enumerated() {
             try Task.checkCancellation()
-            var loop = l0
+            var loop = job.loop
             if op.direction == .conventional { loop = loop.reversed() }
             loop = loop.starting(near: b.pos.xy)
             let path = ClosedPath(loop)
             let P = path.perimeter
-            // Tab centres
             var centres: [Double] = []
-            if tabs.enabled && P >= tabs.minLoopLength {
-                if !tabs.manualPositions.isEmpty {
-                    let maxDist = max(10, R * 4)
-                    for m in tabs.manualPositions {
-                        let s = path.param(nearest: m)
-                        if path.point(at: s).dist(m) < maxDist { centres.append(s) }
-                    }
-                } else {
-                    let count = max(1, tabs.countPerLoop)
-                    let spacing = P / Double(count)
-                    for i in 0..<count {
-                        let nominal = (Double(i) + 0.5) * spacing
-                        // Prefer straight stretches within ±25% of the spacing.
-                        var best = nominal, bestScore = Double.infinity
-                        let search = spacing * 0.25
-                        var s = nominal - search
-                        while s <= nominal + search {
-                            let score = path.turning(at: s, window: tabs.width / 2 + R) + abs(s - nominal) / max(1, spacing) * 0.05
-                            if score < bestScore { bestScore = score; best = s }
-                            s += max(0.5, search / 10)
-                        }
-                        centres.append(best)
-                    }
-                }
+            for a in anchors {
+                let s = path.param(nearest: a)
+                if path.point(at: s).dist(a) < job.snap + 1e-6 { centres.append(s) }
             }
             let half = tabs.width / 2 + R
             let flank = tabs.shape == .triangular ? tabs.height : 0
@@ -524,7 +555,7 @@ extension CAMContext {
             var cursor = 0.0
             var zPrev = zTop
             b.travel(to: V3(loop.points[0], zTop), approachZ: zTop + 1)
-            for z in passZ {
+            for z in job.levels {
                 let dz = zPrev - z
                 let rampLen = min(P, dz / tan(ramp))
                 for (s, p) in path.samples(from: cursor, to: cursor + rampLen, breaks: breaks).dropFirst() {
@@ -538,7 +569,7 @@ extension CAMContext {
                 zPrev = z
             }
             b.retract()
-            progress?(Double(li + 1) / Double(loops.count))
+            progress?(Double(li + 1) / Double(jobs.count))
         }
         var tp = makeToolpath(op, b)
         tp.moves = simplifyLinear(tp.moves)

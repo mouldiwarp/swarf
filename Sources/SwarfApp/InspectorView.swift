@@ -518,6 +518,25 @@ struct OperationInspector: View {
                 }
                 .pickerStyle(.segmented)
             }
+            Section("Finishing pass") {
+                Toggle("Rough, then finish", isOn: b(\.cutoutFinishSettings.enabled))
+                if op.cutoutFinishSettings.enabled {
+                    NumberField(title: "Roughing leaves", value: b(\.cutoutFinishSettings.allowance), step: 0.1, range: 0.05...5)
+                    HStack {
+                        NumberField(title: "Finish depth of cut", value: b(\.finishStepdown), step: 0.5, range: 0.1...100)
+                        if op.cutoutFinish?.stepdown != nil {
+                            Button("4×") { b(\.cutoutFinishSettings.stepdown).wrappedValue = nil }
+                                .controlSize(.small).help("Reset to 4× the roughing stepdown")
+                        }
+                    }
+                    Text(String(format: "Roughing passes cut %.2g mm deep and stay %.2g mm off the part. A finishing pass then takes the last %.2g mm in %d pass%@ of up to %.2g mm, for a clean edge. Tabs are left in both.",
+                                op.cutting.stepdown, op.cutoutFinishSettings.allowance, op.cutoutFinishSettings.allowance,
+                                op.tool.passLevels(top: 0, bottom: -((model.placed?.stockTop ?? 0) + op.throughDepth), stepdown: op.finishStepdown).count,
+                                op.tool.passLevels(top: 0, bottom: -((model.placed?.stockTop ?? 0) + op.throughDepth), stepdown: op.finishStepdown).count == 1 ? "" : "es",
+                                op.finishStepdown))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Holding tabs") {
                 Toggle("Tabs", isOn: b(\.tabs.enabled))
                 if op.tabs.enabled {

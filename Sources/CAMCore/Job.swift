@@ -46,6 +46,17 @@ public enum BoundaryMode: String, Codable, Sendable, CaseIterable {
 
 public enum TabShape: String, Codable, Sendable, CaseIterable { case rectangular, triangular }
 
+/// Cutout roughing + finishing: roughing passes stay `allowance` mm off the part, then a finishing pass
+/// takes the last skin at a larger depth of cut.
+public struct CutoutFinish: Codable, Sendable, Equatable, Hashable {
+    public var enabled = true
+    /// Radial stock left by the roughing passes (mm).
+    public var allowance = 0.5
+    /// Finishing depth of cut (mm). nil = 4× the roughing stepdown.
+    public var stepdown: Double? = nil
+    public init() {}
+}
+
 public struct TabSettings: Codable, Sendable, Equatable, Hashable {
     public var enabled = true
     public var countPerLoop = 4
@@ -86,6 +97,16 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     public var throughDepth = 0.3
     public var cutHoles = true
     public var tabs = TabSettings()
+    public var cutoutFinish: CutoutFinish? = nil
+    public var cutoutFinishSettings: CutoutFinish {
+        get { cutoutFinish ?? CutoutFinish() }
+        set { cutoutFinish = newValue }
+    }
+    /// Finishing depth of cut for cutouts: explicit, or 4× the roughing stepdown.
+    public var finishStepdown: Double {
+        get { max(0.05, cutoutFinishSettings.stepdown ?? cutting.stepdown * 4) }
+        set { cutoutFinishSettings.stepdown = newValue }
+    }
     // V-carve (optional so projects saved before V-carving existed still decode)
     public var vcarve: VCarveSettings? = nil
     public var vcarveSettings: VCarveSettings {
