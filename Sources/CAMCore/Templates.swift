@@ -28,7 +28,7 @@ public enum JobTemplates {
         let t = traits(ctx)
         var ops: [Operation] = []
         let flat6 = library.closest(kind: .flat, diameter: 6) ?? ToolLibrary.starter.tools[0]
-        let ball = library.closest(kind: .ball, diameter: 3) ?? flat6
+        let ball = library.closest(kind: .ball, diameter: 6) ?? flat6
         if t.topBelowStock {
             var f = Operation(kind: .facing, tool: flat6, material: material)
             f.facingDepth = min(ctx.stockTop - ctx.placed.modelBounds.max.z, 2)

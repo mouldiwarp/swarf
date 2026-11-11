@@ -86,7 +86,7 @@ do {
         job.operations = kinds.map { k in
             let tool: Tool = {
                 switch k {
-                case .parallelFinish, .waterlineFinish: return library.closest(kind: .ball, diameter: 3)!
+                case .parallelFinish, .waterlineFinish: return library.closest(kind: .ball, diameter: 6)!
                 case .vcarve: return library.closest(kind: .vBit, diameter: 6.35)!
                 default: return library.closest(kind: .flat, diameter: 6)!
                 }
