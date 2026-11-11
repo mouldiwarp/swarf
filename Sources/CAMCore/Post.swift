@@ -43,7 +43,7 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         id: "workbee-z1plus-rrf", name: "Ooznest WorkBee Z1+ (Duet / RRF)", controller: "RepRapFirmware 3",
         fileExtension: "gcode", commentStyle: .semicolon, toolChange: .none, splitFilesPerTool: true,
         spindleDwell: 5, dwellSyntax: .sSeconds,
-        header: ["G90 ; absolute positioning", "G21 ; millimetres", "G17 ; XY plane", "G94 ; feed per minute"],
+        header: ["G90 ; absolute positioning", "G21 ; millimetres", "G17 ; XY plane for arcs"],
         footer: ["G0 Z{safeZ}", "G0 X0 Y0"],
         envelope: V3(750, 750, 120), maxFeed: 5000, rapidRate: 5000, acceleration: 500, minRPM: 0, maxRPM: 30000,
         notes: "One file per tool. Zero XY on the stock corner and probe Z before each file. Arcs enabled (G2/G3).")
