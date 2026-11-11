@@ -102,7 +102,29 @@ final class ProjectModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        // Operations keep a copy of their tool. When the same tool is edited in the library, update the copy's
+        // geometry (flute length, diameter, flute style…) but keep the operation's own feeds and speeds.
+        ToolLibraryStore.shared.$library
+            .sink { [weak self] lib in
+                Task { @MainActor in self?.syncTools(from: lib) }
+            }
+            .store(in: &cancellables)
         jobChanged()
+    }
+
+    private func syncTools(from lib: ToolLibrary) {
+        let byID = Dictionary(lib.tools.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        func synced(_ op: CAMCore.Operation) -> Tool? {
+            guard var t = byID[op.tool.id] else { return nil }
+            t.number = op.tool.number  // the T number can be overridden per operation
+            return t == op.tool ? nil : t
+        }
+        guard job.operations.contains(where: { synced($0) != nil }) else { return }
+        updateJob("Update Tools from Library") { j in
+            for i in j.operations.indices {
+                if let t = synced(j.operations[i]) { j.operations[i].tool = t }
+            }
+        }
     }
 
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES,

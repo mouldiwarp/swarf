@@ -25,6 +25,7 @@ final class ToolLibraryStore: ObservableObject {
             library = lib
         } else {
             library = .starter
+            save()  // persist so tool IDs stay stable and projects can follow library edits
         }
     }
 

@@ -148,9 +148,14 @@ extension CAMContext {
         let sd = max(0.05, op.cutting.stepdown)
         let so = min(op.stepover, op.tool.diameter * 0.95)
         var levels: [Double] = []
-        var z = stockTop - sd
-        while z > floor + 1e-6 { levels.append(z); z -= sd }
-        levels.append(floor)
+        if op.kind == .pocket {
+            // 2.5D pockets leave visible top edges, so honour the compression first-pass rule.
+            levels = op.tool.passLevels(top: stockTop, bottom: floor, stepdown: sd)
+        } else {
+            var z = stockTop - sd
+            while z > floor + 1e-6 { levels.append(z); z -= sd }
+            levels.append(floor)
+        }
         for f in flatLevels {
             let fz = f + op.stockToLeaveZ
             if fz > floor + 1e-3 && fz < stockTop - 1e-3 { levels.append(fz) }
@@ -458,7 +463,7 @@ extension CAMContext {
         loops.sort { ($0.signedArea > 0 ? 0 : 1) < ($1.signedArea > 0 ? 0 : 1) }
         let zTop = stockTop
         let zBot = -op.throughDepth
-        let n = max(1, Int(ceil((zTop - zBot) / max(0.05, op.cutting.stepdown))))
+        let passZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.cutting.stepdown)
         let ramp = max(0.5, op.cutting.rampAngle) * .pi / 180
         let R = op.tool.radius
         let tabs = op.tabs
@@ -524,8 +529,7 @@ extension CAMContext {
             var cursor = 0.0
             var zPrev = zTop
             b.travel(to: V3(loop.points[0], zTop), approachZ: zTop + 1)
-            for k in 1...n {
-                let z = zTop - Double(k) * (zTop - zBot) / Double(n)
+            for z in passZ {
                 let dz = zPrev - z
                 let rampLen = min(P, dz / tan(ramp))
                 for (s, p) in path.samples(from: cursor, to: cursor + rampLen, breaks: breaks).dropFirst() {
