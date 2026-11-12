@@ -842,6 +842,27 @@ import simd
         #expect(d.feed == 960 && d.plunge == 640 && abs(d.stepdown - 1.125) < 0.01)
     }
 
+    @Test func rrfRapidsRunAtTheRapidRateNotTheCuttingFeed() {
+        // Outside CNC mode RRF runs a bare G0 at the last F, i.e. the cutting feed. Every G0 must carry the rapid rate,
+        // and the next cutting move must restate its own feed.
+        let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        let paths = [path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9)), path(tool: b, from: V3(30, 10, 15), to: V3(40, 20, 9))]
+        for profile in [MachineProfile.workbeeRRF, .duetGeneric] {
+            let post = PostProcessor(profile: profile, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+            for f in post.process(paths) {
+                let lines = f.content.split(separator: "\n").map(String.init)
+                let rapids = lines.filter { $0.hasPrefix("G0") }
+                #expect(rapids.count >= 3)
+                for r in rapids { #expect(r.hasSuffix(" F\(Int(profile.rapidRate))"), "\(profile.id): \(r)") }
+                for (i, l) in lines.enumerated() where l.hasPrefix("G0") {
+                    if let next = lines[(i + 1)...].first(where: { $0.hasPrefix("G1") || $0.hasPrefix("G2") || $0.hasPrefix("G3") }) {
+                        #expect(next.contains(" F"), "\(profile.id): cutting move after a rapid has no feed: \(next)")
+                    }
+                }
+            }
+        }
+    }
+
     @Test func rrfSpindleCommandsNameTheSpindle() {
         // RRF 3.3+ rejects a bare M3 when no tool is selected: "M3: No P parameter and no active tool with spindle".
         let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]

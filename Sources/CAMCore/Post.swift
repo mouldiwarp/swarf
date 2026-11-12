@@ -44,20 +44,23 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         fileExtension: "gcode", commentStyle: .semicolon, toolChange: .none, splitFilesPerTool: true,
         spindleDwell: 5, dwellSyntax: .sSeconds,
         header: ["G90 ; absolute positioning", "G21 ; millimetres", "G17 ; XY plane for arcs"],
-        footer: ["G0 Z{safeZ}", "G0 X0 Y0"],
+        footer: ["G0 Z{safeZ} F{rapid}", "G0 X0 Y0 F{rapid}"],
         // RRF 3.3+ rejects a bare M3 unless a tool with a spindle is selected ("M3: No P parameter and no active
         // tool with spindle"), so name spindle 0 explicitly. That works with or without a selected tool.
         spindleOn: "M3 P0 S{rpm}", spindleOff: "M5 P0",
         envelope: V3(750, 750, 120), maxFeed: 5000, rapidRate: 5000, acceleration: 500, minRPM: 0, maxRPM: 30000,
+        // Outside CNC mode (M453), RRF runs a G0 without F at the last feed used: the cutting feed. Say it explicitly.
+        g0NeedsFeed: true,
         notes: "One file per tool. Zero XY on the stock corner and probe Z before each file. Arcs enabled (G2/G3).")
 
     public static let duetGeneric = MachineProfile(
         id: "duet-rrf", name: "Generic Duet / RepRapFirmware", controller: "RepRapFirmware 3",
         fileExtension: "gcode", commentStyle: .semicolon, toolChange: .rrfPrompt, splitFilesPerTool: false,
         spindleDwell: 3, dwellSyntax: .sSeconds,
-        header: ["G90", "G21", "G17"], footer: ["G0 Z{safeZ}"],
+        header: ["G90", "G21", "G17"], footer: ["G0 Z{safeZ} F{rapid}"],
         spindleOn: "M3 P0 S{rpm}", spindleOff: "M5 P0",
-        envelope: V3(1000, 1000, 150), maxFeed: 6000, rapidRate: 6000, acceleration: 500, minRPM: 0, maxRPM: 30000)
+        envelope: V3(1000, 1000, 150), maxFeed: 6000, rapidRate: 6000, acceleration: 500, minRPM: 0, maxRPM: 30000,
+        g0NeedsFeed: true)
 
     public static let grbl = MachineProfile(
         id: "grbl", name: "Generic GRBL 1.1", controller: "GRBL 1.1",
@@ -354,7 +357,7 @@ public struct PostProcessor: Sendable {
                 case .rrfPrompt:
                     if !firstGroup {
                         out(fill(profile.spindleOff))
-                        out("G0 Z\(num(safeZ - origin.z))")
+                        out("G0 Z\(num(safeZ - origin.z))\(profile.g0NeedsFeed ? " F\(num(profile.rapidRate))" : "")")
                         // RepRapFirmware reads "" inside a quoted string as one literal quote.
                         let shown = Self.ascii(tool.name).replacingOccurrences(of: "\"", with: "\"\"")
                         out("M291 P\"Insert T\(tool.number): \(shown). Re-zero Z, then press OK.\" R\"Tool change\" S3")
