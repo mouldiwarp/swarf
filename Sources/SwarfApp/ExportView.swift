@@ -14,6 +14,15 @@ struct ExportView: View {
     @State private var problem: String?
     @State private var blocking = false
     @State private var fileName = ""
+    /// Line count per file, worked out once in the background (counting a large file on every redraw was slow).
+    @State private var lineCounts: [Int] = []
+    @State private var estimate: Double = 0
+    @State private var preparing = false
+    @State private var buildTask: Task<Void, Never>?
+    /// The base name the current `files` were named with, so a new file name only renames them.
+    @State private var builtBase = ""
+    /// Showing the G-code is optional: off by default, remembered between exports.
+    @AppStorage("exportShowPreview") private var showPreview = false
 
     var profile: MachineProfile { MachineProfile.find(machineID.isEmpty ? model.job.machineID : machineID) }
 
@@ -47,7 +56,7 @@ struct ExportView: View {
                                         Image(systemName: "doc.text")
                                         Text(f.name).lineLimit(1).truncationMode(.middle)
                                         Spacer()
-                                        Text("\(f.content.split(separator: "\n").count) lines").font(.caption).foregroundStyle(.secondary)
+                                        Text(lineCounts.indices.contains(i) ? "\(lineCounts[i].formatted()) lines" : "").font(.caption).foregroundStyle(.secondary)
                                     }
                                     .padding(4)
                                     .background(i == selectedFile ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 4))
@@ -63,7 +72,7 @@ struct ExportView: View {
                                 Text(String(format: "Stock: %.1f × %.1f × %.1f mm", p.stockSize.x, p.stockSize.y, p.stockSize.z))
                                 Text("Zero: \(model.job.origin.y.rawValue)-\(model.job.origin.x.rawValue), \(model.job.origin.z == .stockTop ? "top of stock" : "bed")")
                             }
-                            Text("Estimated time: " + formatDuration(model.toolpaths.reduce(0) { $0 + $1.stats(rapidRate: profile.rapidRate, acceleration: profile.acceleration).seconds }))
+                            Text("Estimated time: " + (preparing ? "…" : formatDuration(estimate)))
                             if profile.splitFilesPerTool && files.count > 1 {
                                 Label("Run the files in order. Change the bit and re-probe Z between them.", systemImage: "info.circle").font(.caption)
                             }
@@ -80,18 +89,27 @@ struct ExportView: View {
                     }
                     Spacer()
                 }
-                .frame(width: 330)
-                ScrollView([.vertical, .horizontal]) {
-                    Text(preview)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
+                .frame(width: showPreview ? 330 : nil)
+                .frame(maxWidth: showPreview ? 330 : .infinity)
+                if showPreview {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(preview)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
+                    .defaultScrollAnchor(.topLeading)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
                 }
-                .defaultScrollAnchor(.topLeading)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+            }
+            if preparing {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(model.generating ? "Waiting for toolpaths…" : "Preparing G-code…").foregroundStyle(.secondary)
+                }
             }
             if let p = problem {
                 Label(p, systemImage: "xmark.octagon.fill").foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -100,35 +118,46 @@ struct ExportView: View {
             }
             HStack {
                 Button("Setup Sheet (PDF)…") { exportSetupSheet() }
+                Toggle("Show G-code", isOn: $showPreview)
                 Button("Copy G-code") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(files.indices.contains(selectedFile) ? files[selectedFile].content : "", forType: .string)
                 }
+                .disabled(files.isEmpty || preparing)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(files.count > 1 ? "Export \(files.count) Files…" : "Export…") { export() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(files.isEmpty || blocking)
+                    .disabled(files.isEmpty || blocking || preparing)
             }
         }
         .padding(20)
-        .frame(minWidth: 980, minHeight: 620)
+        .frame(minWidth: showPreview ? 980 : 560, minHeight: showPreview ? 620 : 420)
         .onAppear {
             machineID = model.job.machineID
             fileName = model.job.exportName ?? model.document.modelName
             rebuild()
         }
-        .onChange(of: fileName) { _, _ in rebuild() }
+        .onChange(of: fileName) { _, _ in rename() }
+        .onDisappear { buildTask?.cancel() }
         .onChange(of: machineID) { _, _ in rebuild() }
         .onChange(of: model.toolpathVersion) { _, _ in rebuild() }
         .onChange(of: model.generating) { _, _ in rebuild() }
     }
 
+    /// The first 400 lines of the selected file. Scans only as far as it needs to, so it is cheap on huge files.
     var preview: String {
-        guard files.indices.contains(selectedFile) else { return "" }
-        let lines = files[selectedFile].content.split(separator: "\n", omittingEmptySubsequences: false)
-        let head = lines.prefix(400).joined(separator: "\n")
-        return lines.count > 400 ? head + "\n… (\(lines.count - 400) more lines)" : head
+        guard showPreview, files.indices.contains(selectedFile) else { return "" }
+        let content = files[selectedFile].content
+        let total = lineCounts.indices.contains(selectedFile) ? lineCounts[selectedFile] : 0
+        var seen = 0
+        var cut = content.utf8.endIndex
+        for i in content.utf8.indices where content.utf8[i] == UInt8(ascii: "\n") {
+            seen += 1
+            if seen == 400 { cut = i; break }
+        }
+        let head = String(content[..<cut])
+        return total > 400 ? head + "\n… (\((total - 400).formatted()) more lines)" : head
     }
 
     /// The typed name, or nil for "use the model name".
@@ -143,24 +172,64 @@ struct ExportView: View {
         if model.job.exportName != name { model.updateJob("Change Export Name") { $0.exportName = name } }
     }
 
+    /// Applies a new file name by renaming the prepared files; their contents don't depend on the name.
+    func rename() {
+        guard var post = model.postProcessor(profile: profile), !files.isEmpty, !builtBase.isEmpty else { return }
+        post.fileName = chosenName
+        let base = post.fileBaseName
+        guard base != builtBase else { return }
+        files = files.map { f in
+            var f = f
+            if f.name.hasPrefix(builtBase) { f.name = base + f.name.dropFirst(builtBase.count) }
+            return f
+        }
+        builtBase = base
+        exported = nil
+    }
+
+    /// Prepares the files in the background. Big 3D jobs produce millions of lines, and doing it on the main
+    /// thread froze the dialog. A newer request cancels an older one.
     func rebuild() {
         exported = nil
         problem = nil
         blocking = model.generating
+        buildTask?.cancel()
         guard var post = model.postProcessor(profile: profile) else {
-            files = []
+            files = []; lineCounts = []
             warnings = ["There is no model to export."]
+            preparing = false
             return
         }
         post.fileName = chosenName
-        files = post.process(model.toolpaths)
-        if !files.indices.contains(selectedFile) { selectedFile = 0 }
-        var w = model.exportIssues
-        if files.isEmpty && w.isEmpty { w.append("There are no toolpaths to export. Add an operation first.") }
-        w += post.validate(model.toolpaths)
-        w += model.toolpaths.flatMap { tp in tp.warnings.map { "\(tp.name): \($0)" } }
-        w += StockSimulator.keepOutViolations(model.toolpaths, regions: model.job.regions, stockTop: model.placed?.stockTop)
-        warnings = w
+        let toolpaths = model.toolpaths
+        let issues = model.exportIssues
+        let regions = model.job.regions
+        let stockTop = model.placed?.stockTop
+        let profile = self.profile
+        preparing = true
+        buildTask = Task {
+            let result = await Task.detached(priority: .userInitiated) { () -> ([PostFile], [Int], [String], Double)? in
+                let files = post.process(toolpaths)
+                if Task.isCancelled { return nil }
+                let counts = files.map { f in f.content.utf8.reduce(0) { $0 + ($1 == UInt8(ascii: "\n") ? 1 : 0) } }
+                var w = issues
+                if files.isEmpty && w.isEmpty { w.append("There are no toolpaths to export. Add an operation first.") }
+                w += post.validate(toolpaths)
+                w += toolpaths.flatMap { tp in tp.warnings.map { "\(tp.name): \($0)" } }
+                w += StockSimulator.keepOutViolations(toolpaths, regions: regions, stockTop: stockTop)
+                let secs = toolpaths.reduce(0) { $0 + $1.stats(rapidRate: profile.rapidRate, acceleration: profile.acceleration).seconds }
+                return (files, counts, w, secs)
+            }.value
+            guard !Task.isCancelled, let (f, c, w, secs) = result else { return }
+            files = f
+            lineCounts = c
+            warnings = w
+            estimate = secs
+            builtBase = post.fileBaseName
+            if !files.indices.contains(selectedFile) { selectedFile = 0 }
+            preparing = false
+            rename()  // the name may have been edited while the files were being prepared
+        }
     }
 
     func export() {

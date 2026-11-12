@@ -813,6 +813,28 @@ import simd
         #expect(g.contains("G1 X30 F1500"), "\(g)")
     }
 
+    @Test func fastNumberFormattingMatchesPrintf() {
+        for decimals in [0, 1, 3, 4] {
+            var profile = MachineProfile.workbeeRRF
+            profile.decimals = decimals
+            let post = PostProcessor(profile: profile, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+            func reference(_ v: Double) -> String {
+                var s = String(format: "%.\(decimals)f", v)
+                if s.contains(".") { while s.hasSuffix("0") { s.removeLast() }; if s.hasSuffix(".") { s.removeLast() } }
+                return s == "-0" ? "0" : s
+            }
+            var values: [Double] = [0, -0.0, 1, -1, 0.5, 0.05, 0.0005, -0.0004, 10.1, 123.456789, -98.7654, 1e-7, 749.9995, 18000, -0.25]
+            var rng = SystemRandomNumberGenerator()
+            for _ in 0..<5000 { values.append(Double.random(in: -800...800, using: &rng)) }
+            for v in values {
+                // Exact ties (x.xxx5) may round differently in binary; skip values within 1e-9 of one.
+                let scaled = abs(v) * pow(10, Double(decimals))
+                if abs(scaled - scaled.rounded(.down) - 0.5) < 1e-6 { continue }
+                #expect(post.num(v) == reference(v), "\(v) at \(decimals) decimals")
+            }
+        }
+    }
+
     @Test func materialAdjustmentIsDescribed() {
         #expect(Material.named("mdf").adjustmentSummary == nil)
         #expect(Material.named("hardwood").adjustmentSummary == "feed and plunge ×0.8, stepdown ×0.75")

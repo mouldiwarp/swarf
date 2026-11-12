@@ -234,6 +234,24 @@ public struct PostProcessor: Sendable {
     }
 
     func num(_ v: Double) -> String {
+        // Fast path: format through an integer instead of String(format:), which dominated export time on big jobs.
+        // Same output: rounded to `decimals`, trailing zeros and point dropped, no "-0".
+        let d = profile.decimals
+        if d >= 0, d <= 6, v.isFinite, abs(v) < 1e9 {
+            var p = 1
+            for _ in 0..<d { p *= 10 }
+            let scaled = Int((abs(v) * Double(p)).rounded())
+            if scaled == 0 { return "0" }
+            var intPart = String(scaled / p)
+            var frac = scaled % p
+            if frac != 0 {
+                var digits = d
+                while frac % 10 == 0 { frac /= 10; digits -= 1 }
+                let f = String(frac)
+                intPart += "." + String(repeating: "0", count: digits - f.count) + f
+            }
+            return v < 0 ? "-" + intPart : intPart
+        }
         var s = String(format: "%.\(profile.decimals)f", v)
         if s.contains(".") {
             while s.hasSuffix("0") { s.removeLast() }
@@ -259,6 +277,12 @@ public struct PostProcessor: Sendable {
         }
     }
 
+    /// The start of every exported file's name. File contents never depend on it, so a rename only needs this.
+    public var fileBaseName: String {
+        let chosen = fileName.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? jobName
+        return Self.fileSafe(Self.stripExtension(chosen, profile.fileExtension), fallback: "job") + (testCut != nil ? "_TEST" : "")
+    }
+
     /// Produce one or more files depending on the profile's tool-change strategy.
     public func process(_ toolpaths: [Toolpath]) -> [PostFile] {
         // Group consecutive toolpaths by tool.
@@ -271,8 +295,7 @@ public struct PostProcessor: Sendable {
             }
         }
         if groups.isEmpty { return [] }
-        let chosen = fileName.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? jobName
-        let base = Self.fileSafe(Self.stripExtension(chosen, profile.fileExtension), fallback: "job") + (testCut != nil ? "_TEST" : "")
+        let base = fileBaseName
         if profile.splitFilesPerTool && groups.count > 1 {
             return groups.enumerated().map { i, g in
                 let t = g[0].tool
@@ -430,15 +453,29 @@ public enum ArcFitter {
             if pts.count < 4 || abs(m.to.z - start.z) > 1e-6 {
                 out.append(m); prevPos = m.to; i += 1; continue
             }
-            // Greedy arc fitting along pts.
+            // Greedy arc fitting along pts. Trying every end point in turn is quadratic in the run length and made
+            // big 3D jobs take close to a minute, so: give up at once if even the shortest arc (4 points) fails,
+            // otherwise double the span until it fails and binary-search the longest one that fits. Every arc that
+            // is emitted has been checked against all of its points, so the result is exactly as accurate.
+            let xy = pts.map(\.xy)
             var a = 0
             while a < pts.count - 1 {
                 var best = -1
                 var bestArc: (V2, Bool)? = nil
-                var b = a + 3
-                while b < pts.count && b - a <= 400 {
-                    if let arc = arcFits(Array(pts[a...b]), tolerance) { best = b; bestArc = arc } else if best > 0 { break }
-                    b += 1
+                let maxB = min(pts.count - 1, a + 400)
+                if a + 3 <= maxB, let first = arcFits(xy, a, a + 3, tolerance) {
+                    best = a + 3; bestArc = first
+                    var step = 4
+                    var bad = maxB + 1
+                    while best < maxB {
+                        let b = min(maxB, a + 3 + step)
+                        if let arc = arcFits(xy, a, b, tolerance) { best = b; bestArc = arc; step *= 2 } else { bad = b; break }
+                    }
+                    var lo = best, hi = bad
+                    while hi - lo > 1 {
+                        let mid = (lo + hi) / 2
+                        if let arc = arcFits(xy, a, mid, tolerance) { lo = mid; best = mid; bestArc = arc } else { hi = mid }
+                    }
                 }
                 if best > 0, let (c, cw) = bestArc {
                     out.append(Move(cw ? .arcCW : .arcCCW, pts[best], feed: m.feed, center: c))
@@ -465,14 +502,18 @@ public enum ArcFitter {
     }
 
     static func arcFits(_ p3: [V3], _ tol: Double) -> (V2, Bool)? {
-        let p = p3.map(\.xy)
-        guard let (c, r) = circle(p[0], p[p.count / 2], p[p.count - 1]), r > 0.2, r < 2000 else { return nil }
+        arcFits(p3.map(\.xy), 0, p3.count - 1, tol)
+    }
+
+    /// Whether the points `p[lo...hi]` lie on one arc within `tol`; returns its centre and direction.
+    static func arcFits(_ p: [V2], _ lo: Int, _ hi: Int, _ tol: Double) -> (V2, Bool)? {
+        guard hi - lo >= 2, let (c, r) = circle(p[lo], p[(lo + hi) / 2], p[hi]), r > 0.2, r < 2000 else { return nil }
         // All points on circle, chord sagitta within tolerance, consistent turning.
         var sweep = 0.0
         var sign = 0.0
-        for k in 0..<p.count {
+        for k in lo...hi {
             if abs(simd_distance(p[k], c) - r) > tol { return nil }
-            if k > 0 {
+            if k > lo {
                 let chord = simd_distance(p[k - 1], p[k])
                 if chord > 2 * r * 0.999 { return nil }
                 let sag = r - (max(0, r * r - chord * chord / 4)).squareRoot()
