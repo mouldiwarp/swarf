@@ -67,6 +67,12 @@ Three targets share one engine:
    contours are pure cell staircases. `straightenGridRuns` (Operations.swift) replaces those stretches, and the
    inner pocket passes, with chords; on the wall pass it may reach 0.75 cells past the mask, which is always spare
    margin. Measure motion smoothness on real output by counting turn-direction flips between consecutive G1 moves.
+   Rest machining (Rest.swift): `Operation.restFrom` holds a copy of the larger tool. `restField` erodes both tools'
+   fields into the surfaces they can leave; where the larger tool's is higher, tool positions touching that material
+   may cut (`RestField.materialTop`). `clearing` masks each level with it and cuts the areas depth-first, one corner at
+   a time; parallel and waterline just skip positions that touch nothing. A shank wider than the cutter
+   (`Tool.hasWideShank`) is kept off the model above the flutes in `toolField` (a disc dilation minus the flute
+   length), so its diameter and flute length are in `fieldKey`.
 6. `CAMContext.generate(op)` is the single entry point: it validates settings, dispatches by
    `OperationKind`, rejects non-finite moves, and appends warnings (feeds, flute length, test-cut, below
    stock). `JobTemplates.fullProcessing` (Templates.swift) picks operations from model traits.

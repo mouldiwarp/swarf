@@ -108,6 +108,12 @@ public struct Tool: Codable, Sendable, Identifiable, Equatable, Hashable {
         }
     }
 
+    /// True when the shank is wider than the cutter (a 1 mm bit on a 1/8" shank). Above the flutes such a shank would
+    /// rub a wall the cutter itself clears, so the engine keeps it off the model (see `CAMContext.toolField`).
+    public var hasWideShank: Bool {
+        (kind == .flat || kind == .ball || kind == .bullNose) && shankDiameter > diameter + 0.01 && fluteLength > 0
+    }
+
     /// Chip load (mm/tooth) at the default feed.
     public var chipLoad: Double { defaults.feed / max(1, defaults.rpm) / Double(max(1, flutes)) }
 }
@@ -212,7 +218,29 @@ public struct ToolLibrary: Codable, Sendable, Equatable {
                  stickout: 25, defaults: wood(18000, 1000, 300, 1.0, 20)),
             Tool(number: 10, name: "45° V-Bit 6 mm", kind: .vBit, diameter: 6, vAngle: 45, flutes: 2, fluteLength: 7.24,
                  stickout: 25, defaults: wood(18000, 1000, 300, 1.0, 20)),
-        ])
+        ] + smallFlats)
+    }()
+
+    /// Small flat end mills for rest machining, on 1/8" and 4 mm shanks. Their flutes are short and the shank is wider
+    /// than the cutter, which limits how deep they can reach beside a wall. Typical values: measure your own bits.
+    public static let smallFlats: [Tool] = {
+        let sizes: [(d: Double, flute: Double, cd: CuttingData)] = [
+            (2, 6, CuttingData(rpm: 18000, feed: 720, plunge: 200, stepdown: 0.5, stepoverPercent: 40)),
+            (1, 3, CuttingData(rpm: 18000, feed: 430, plunge: 120, stepdown: 0.25, stepoverPercent: 40)),
+            (0.9, 3, CuttingData(rpm: 18000, feed: 400, plunge: 100, stepdown: 0.2, stepoverPercent: 40)),
+        ]
+        var out: [Tool] = []
+        var n = 11
+        for s in sizes {
+            for (shank, label) in [(3.175, "1/8\" shank"), (4.0, "4 mm shank")] {
+                var t = Tool(number: n, name: String(format: "%g mm Flat 2F (%@)", s.d, label), kind: .flat, diameter: s.d, flutes: 2,
+                             fluteLength: s.flute, stickout: 20, shankDiameter: shank, defaults: s.cd)
+                t.notes = "Typical values: measure the flute length and shank of your own bit."
+                out.append(t)
+                n += 1
+            }
+        }
+        return out
     }()
 
     public func closest(kind: ToolKind, diameter: Double) -> Tool? {

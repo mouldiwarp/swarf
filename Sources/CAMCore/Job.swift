@@ -13,6 +13,14 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         }
     }
 
+    /// Strategies that can do rest machining (cut only what a larger tool left).
+    public var supportsRest: Bool {
+        switch self {
+        case .pocket, .roughing, .parallelFinish, .waterlineFinish: return true
+        case .facing, .vcarve, .drill, .cutout, .dowelHoles: return false
+        }
+    }
+
     public var displayName: String {
         switch self {
         case .facing: return "Facing"
@@ -141,6 +149,10 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
         get { dowel ?? DowelSettings() }
         set { dowel = newValue }
     }
+    /// Rest machining: the larger tool an earlier operation used. When set, this operation cuts only the material that
+    /// tool could not reach (tight corners, narrow slots, concave curves), using this operation's own area and depth
+    /// settings. Pockets, 3D roughing and both 3D finishes support it. nil = cut everything (older projects).
+    public var restFrom: Tool? = nil
     /// Which face this operation machines in a two-sided job. nil = side A. Optional so older projects still open.
     public var side: MachiningSide? = nil
     public var machiningSide: MachiningSide {

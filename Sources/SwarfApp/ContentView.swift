@@ -309,6 +309,14 @@ struct SimulationBar: View {
                     }
                 }
                 .font(.caption)
+                if let hint = model.restSuggestion {
+                    HStack(spacing: 8) {
+                        Label(hint.text, systemImage: "arrow.down.right.and.arrow.up.left")
+                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        Button("Add Rest Clearing") { model.addRestClearing(after: hint.opID) }.controlSize(.small)
+                    }
+                    .font(.caption)
+                }
             } else {
                 Text("Simulating…").font(.caption).foregroundStyle(.secondary)
             }

@@ -34,6 +34,18 @@ Two-sided (flip) machining is in: dowel holes, side A, a roll about X, then side
   Each needs a test like `OperationTests.pocketWallsAreExactAtEveryDepth`: wall distance exact at every depth,
   zero gouges.
 
+## Rest machining
+
+Rest machining is in (`Rest.swift`): a smaller tool cuts only what a larger one left. Loose ends:
+
+- **Cut a rest pass on the WorkBee** with a real small bit, and measure its flute length and shank. The starter values
+  for the 2 mm, 1 mm and 0.9 mm bits are typical, not measured.
+- **Uncut stock and the shank.** The shank is kept off the model, but not off leftover material that this tool itself
+  can't reach. That needs leftover deep beside a wall within a shank radius of where the bit cuts; it hasn't come up in
+  tests.
+- **Reference by operation, not tool.** A rest pass follows a tool and uses its own area and depth. Following the
+  earlier operation's actual settings (or its simulated stock) would remove the need to keep them matched.
+
 ## App
 
 - **Check that the export file name is remembered.** Typing a name and the live rename were checked in the

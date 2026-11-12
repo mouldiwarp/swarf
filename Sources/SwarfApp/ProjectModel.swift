@@ -152,16 +152,24 @@ final class ProjectModel: ObservableObject {
             t.number = op.tool.number  // the T number can be overridden per operation
             return t == op.tool ? nil : t
         }
-        guard job.operations.contains(where: { synced($0) != nil }) else { return }
+        // A rest pass's larger tool is a copy too: keep its geometry in step, or the pass would follow the old size.
+        func syncedRef(_ op: CAMCore.Operation) -> Tool? {
+            guard let r = op.restFrom, var t = byID[r.id] else { return nil }
+            t.number = r.number
+            return t == r ? nil : t
+        }
+        guard job.operations.contains(where: { synced($0) != nil || syncedRef($0) != nil }) else { return }
         updateJob("Update Tools from Library") { j in
             for i in j.operations.indices {
                 if let t = synced(j.operations[i]) { j.operations[i].tool = t }
+                if let t = syncedRef(j.operations[i]) { j.operations[i].restFrom = t }
             }
         }
     }
 
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES, -SwarfAutoExport YES,
-    /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
+    /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template), -SwarfAutoRest YES (then a
+    /// rest-clearing pass after the last pocket or roughing),
     /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box),
     /// -SwarfMargin mm (stock XY margin), -SwarfFlip YES (two-sided job), -SwarfDowelPicks x,y;x,y (hand-placed dowel
     /// holes, stock space), -SwarfDowelHover x,y with -SwarfMode placeDowel (shows the placement preview there).
@@ -184,6 +192,7 @@ final class ProjectModel: ObservableObject {
         } else {
             addFullProcessing()
         }
+        if d.bool(forKey: "SwarfAutoRest") { addRestClearing() }
         if let s = d.string(forKey: "SwarfDowelPicks") {
             let picks = s.split(separator: ";").compactMap { item -> V2? in
                 let v = item.split(separator: ",").compactMap { Double($0) }
@@ -361,6 +370,101 @@ final class ProjectModel: ObservableObject {
         let m = Material.named(job.stock.materialID)
         if let adj = m.adjustmentSummary, !ops.isEmpty {
             showNotice("Feeds and speeds for these \(ops.count) operations were adjusted for \(m.name): \(adj) of the tool library's MDF values.")
+        }
+    }
+
+    // MARK: Rest machining
+
+    /// The clearing operation a new rest pass follows: the selected pocket or 3D roughing if there is one, otherwise the
+    /// last enabled one.
+    var restSourceOperation: CAMCore.Operation? {
+        func clears(_ o: CAMCore.Operation) -> Bool { (o.kind == .pocket || o.kind == .roughing) && o.restFrom == nil }
+        if let s = selectedOperation, clears(s) { return s }
+        return job.operations.last { $0.enabled && clears($0) }
+    }
+
+    /// The tool for a rest pass after `ref`: the largest flat end mill in the library clearly smaller than it.
+    func restTool(after ref: Tool) -> Tool? {
+        let lib = ToolLibraryStore.shared.library.tools
+        return (lib.isEmpty ? ToolLibrary.starter.tools : lib)
+            .filter { $0.kind == .flat && $0.diameter < ref.diameter - 0.5 }
+            .max { $0.diameter < $1.diameter }
+    }
+
+    /// Adds a rest-clearing pass right after a pocket or 3D roughing operation (`after`, or `restSourceOperation`): the
+    /// same area, depth, side and stock to leave, with a smaller bit that cuts only what the larger one couldn't reach.
+    func addRestClearing(after id: UUID? = nil) {
+        guard let src = id.flatMap({ i in job.operations.first { $0.id == i } }) ?? restSourceOperation else {
+            showNotice("Add a pocket or 3D roughing operation first. Rest clearing cuts what its tool couldn't reach.")
+            return
+        }
+        guard let tool = restTool(after: src.tool) else {
+            showNotice("The tool library has no flat end mill smaller than \(src.tool.name). Add one under Edit Tool Library.")
+            return
+        }
+        var op = src
+        op.id = UUID()
+        op.name = "Rest Clearing"
+        op.enabled = true
+        op.tool = tool
+        op.restFrom = src.tool
+        op.cutting = CAMCore.Material.named(job.stock.materialID).apply(tool.defaults)
+        updateJob("Add Rest Clearing") { j in
+            let i = j.operations.firstIndex { $0.id == src.id }.map { $0 + 1 } ?? j.operations.count
+            j.operations.insert(op, at: i)
+        }
+        selection = .operation(op.id)
+        restSuggestion = nil
+        announceScaling(tool)
+    }
+
+    /// Tools a rest pass for `op` can follow: other operations' tools and library tools larger than its own, nearest
+    /// earlier operation first.
+    func restReferenceChoices(for op: CAMCore.Operation) -> [Tool] {
+        let mine = job.operations.firstIndex { $0.id == op.id } ?? job.operations.count
+        let earlier = job.operations.prefix(mine).reversed().filter { $0.kind.supportsRest || $0.kind == .facing }.map(\.tool)
+        let later = job.operations.suffix(from: min(mine + 1, job.operations.count)).map(\.tool)
+        var seen = Set<UUID>()
+        return (earlier + later + ToolLibraryStore.shared.library.tools).filter { t in
+            [.flat, .ball, .bullNose].contains(t.kind) && t.diameter > op.tool.diameter + 1e-6 && seen.insert(t.id).inserted
+        }
+    }
+
+    /// Shown in the simulation bar when a clearing operation leaves material a smaller bit could take out.
+    @Published private(set) var restSuggestion: (text: String, opID: UUID)? = nil
+    private var restSuggestionTask: Task<Void, Never>?
+
+    /// Looks for the clearing operation with the most material a smaller library bit could still remove.
+    func updateRestSuggestion() {
+        restSuggestionTask?.cancel()
+        restSuggestion = nil
+        guard let ctx = context else { return }
+        // Operations already followed by a rest pass from their tool, on their side, need no suggestion.
+        func followed(_ o: CAMCore.Operation) -> Bool {
+            job.operations.contains { $0.restFrom?.id == o.tool.id && $0.machiningSide == o.machiningSide }
+        }
+        let candidates: [(CAMCore.Operation, Tool)] = job.operations.compactMap { o in
+            guard o.enabled, o.kind == .pocket || o.kind == .roughing, o.restFrom == nil, !followed(o),
+                  let t = restTool(after: o.tool) else { return nil }
+            return (o, t)
+        }
+        guard !candidates.isEmpty else { return }
+        restSuggestionTask = Task { [weak self] in
+            let found = await Task.detached(priority: .utility) { () -> (String, UUID)? in
+                var best: (Double, String, UUID)? = nil
+                for (o, t) in candidates {
+                    if Task.isCancelled { return nil }
+                    guard let p = ctx.restPotential(after: o, with: t), p.area >= 5, p.maxThickness >= 0.5 else { continue }
+                    if p.area > (best?.0 ?? 0) {
+                        best = (p.area, String(format: "%@ leaves about %.0f mm² in corners and slots its Ø%g mm bit can't reach. A Ø%g mm rest pass could clear it.",
+                                               o.name, p.area, o.tool.diameter, t.diameter), o.id)
+                    }
+                }
+                return best.map { ($0.1, $0.2) }
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.restSuggestion = found.map { (text: $0.0, opID: $0.1) }
+            self.dumpState()
         }
     }
 
@@ -737,6 +841,22 @@ final class ProjectModel: ObservableObject {
         toolpathVersion += 1
         if simMode || pendingAutoSim { pendingAutoSim = false; startSimulation() }
         if pendingAutoExport { pendingAutoExport = false; showExport = true }
+        dumpState()
+    }
+
+    /// Developer hook for checks without a screen: -SwarfDumpState <file> writes the operations, their toolpaths and
+    /// warnings, the simulation result and any rest-machining suggestion each time they change.
+    func dumpState() {
+        guard let path = UserDefaults.standard.string(forKey: "SwarfDumpState") else { return }
+        var lines: [String] = []
+        for op in job.operations {
+            let tp = toolpaths.first { $0.id == op.id }
+            lines.append("op \(op.name) | \(op.kind.rawValue) | tool \(op.tool.name) | rest \(op.restFrom?.name ?? "-") | moves \(tp?.moves.count ?? -1)")
+            for w in tp?.warnings ?? [] { lines.append("  warning \(w)") }
+        }
+        if let a = simAnalysis { lines.append("sim gouges \(a.gougeCells) leftover \(a.leftoverCells)") }
+        if let r = restSuggestion { lines.append("suggestion \(r.text)") }
+        try? lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     nonisolated static func makeContext(mesh: Mesh, job: Job) async -> CAMContext {
@@ -818,6 +938,8 @@ final class ProjectModel: ObservableObject {
     }
 
     func stopSimulation() {
+        restSuggestionTask?.cancel()
+        restSuggestion = nil
         simPlaying = false
         playTimer?.invalidate()
         simMode = false
@@ -836,7 +958,7 @@ final class ProjectModel: ObservableObject {
             guard let self, self.simRunner === runner else { return }
             self.simStock = stock
             self.simBottom = bottom
-            if let a = analysis { self.simAnalysis = a }
+            if let a = analysis { self.simAnalysis = a; self.updateRestSuggestion(); self.dumpState() }
             self.simToolPosition = toolPos
             self.simVersion += 1
         }

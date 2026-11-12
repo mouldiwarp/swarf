@@ -27,8 +27,24 @@ public enum ToolDilation {
         return k
     }
 
+    /// A flat disc of `radius` mm: dilating with it gives the highest value within that distance.
+    public static func disc(radius: Double, res: Double) -> Kernel {
+        let n = Int(ceil(radius / res))
+        var k = Kernel()
+        for j in -n...n {
+            for i in -n...n where Double(i * i + j * j).squareRoot() * res <= radius + 1e-9 {
+                k.dx.append(Int32(i)); k.dy.append(Int32(j)); k.off.append(0)
+            }
+        }
+        if k.count == 0 { k.dx = [0]; k.dy = [0]; k.off = [0] }
+        return k
+    }
+
     public static func dilate(_ h: Grid2D, tool: Tool, extraRadius: Double = 0, useGPU: Bool = true) -> Grid2D {
-        let k = kernel(for: tool, res: h.res, extraRadius: extraRadius)
+        dilate(h, kernel: kernel(for: tool, res: h.res, extraRadius: extraRadius), useGPU: useGPU)
+    }
+
+    public static func dilate(_ h: Grid2D, kernel k: Kernel, useGPU: Bool = true) -> Grid2D {
         if useGPU, let gpu = MetalDilator.shared, let out = gpu.dilate(h, kernel: k) { return out }
         return dilateCPU(h, kernel: k)
     }

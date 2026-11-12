@@ -115,6 +115,8 @@ struct SidebarView: View {
                     Spacer()
                     Menu {
                         Button { model.addFullProcessing() } label: { Label("Full Processing (auto)", systemImage: "wand.and.stars") }
+                        Button { model.addRestClearing() } label: { Label("Rest Clearing (smaller bit)", systemImage: "arrow.down.right.and.arrow.up.left") }
+                            .disabled(model.restSourceOperation == nil)
                         Divider()
                         ForEach(OperationKind.allCases) { k in
                             Button { model.addOperation(k) } label: { Label(k.displayName, systemImage: k.symbol) }

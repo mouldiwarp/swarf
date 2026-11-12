@@ -44,8 +44,9 @@ public final class CAMContext: @unchecked Sendable {
     let protection: FrameProtection?
 
     private var fieldCache: [String: Grid2D] = [:]
+    var restCache: [String: RestField] = [:]
     private var footprintCache: Footprint?
-    private let lock = NSLock()
+    let lock = NSLock()
     private var sideBCache: CAMContext?
 
     /// The side-B context for this job (built on first use), protecting the job's own side-A cutouts.
@@ -298,17 +299,44 @@ public final class CAMContext: @unchecked Sendable {
         return g
     }
 
-    /// Tool-tip height field for an operation (cached).
-    public func toolField(_ op: Operation) -> Grid2D {
-        // Everything obstacleHeights() and the dilation depend on. 3D strategies use a more conservative field than
-        // 2.5D ones, so the two must never share a cache entry.
+    /// Everything `obstacleHeights()` and the dilation depend on, as a cache key. 3D strategies use a more conservative
+    /// field than 2.5D ones, so the two must never share a cache entry.
+    func fieldKey(_ op: Operation) -> String {
         let conservative = op.kind == .roughing || op.kind == .parallelFinish || op.kind == .waterlineFinish
-        let key = "\(conservative)|\(op.tool.kind)|\(op.tool.diameter)|\(op.tool.cornerRadius)|\(op.tool.vAngle)|\(op.tool.tipDiameter)|\(op.stockToLeaveXY)|\(op.stockToLeaveZ)|\(op.boundary)|\(op.boundaryMargin)|\(floorZ(op))|\(regions(for: op).map { "\($0.min)\($0.max)\($0.kind)\(String(describing: $0.protectBelowZ))" })"
+        let t = op.tool
+        let shank = t.hasWideShank ? "|shank\(t.shankDiameter)/\(t.fluteLength)" : ""
+        return "\(conservative)|\(t.kind)|\(t.diameter)|\(t.cornerRadius)|\(t.vAngle)|\(t.tipDiameter)\(shank)|\(op.stockToLeaveXY)|\(op.stockToLeaveZ)|\(op.boundary)|\(op.boundaryMargin)|\(floorZ(op))|\(regions(for: op).map { "\($0.min)\($0.max)\($0.kind)\(String(describing: $0.protectBelowZ))" })"
+    }
+
+    /// Tool-tip height field for an operation (cached).
+    ///
+    /// A shank wider than the cutter (`Tool.hasWideShank`) is kept clear of the model too: wherever the shank's
+    /// footprint covers model higher than the flute length above the tip, the tip is raised. Out-of-bounds cells
+    /// (forbidden by the boundary or a keep-out) count as uncut stock at the stock top for that test, so the shank
+    /// never runs deep along an edge it can't see; outside the stock there is nothing to hit.
+    public func toolField(_ op: Operation) -> Grid2D {
+        let key = fieldKey(op)
         lock.lock()
         if let f = fieldCache[key] { lock.unlock(); return f }
         lock.unlock()
         let h = obstacleHeights(op)
-        let t = ToolDilation.dilate(h, tool: op.tool, extraRadius: op.stockToLeaveXY)
+        var t = ToolDilation.dilate(h, tool: op.tool, extraRadius: op.stockToLeaveXY)
+        if op.tool.hasWideShank {
+            let s = placed.stockSize, top = Float(stockTop)
+            var src = h
+            for y in 0..<h.height {
+                for x in 0..<h.width {
+                    let p = h.world(x, y), i = y * h.width + x
+                    if p.x < 0 || p.y < 0 || p.x > s.x || p.y > s.y { src.data[i] = Grid2D.none }
+                    else if src.data[i] >= Grid2D.forbidThreshold { src.data[i] = top }
+                }
+            }
+            let shank = ToolDilation.dilate(src, kernel: ToolDilation.disc(radius: op.tool.shankDiameter / 2 + op.stockToLeaveXY, res: h.res))
+            let reach = Float(op.tool.fluteLength)
+            for i in t.data.indices where shank.data[i] > Grid2D.none / 2 {
+                t.data[i] = max(t.data[i], shank.data[i] - reach)
+            }
+        }
         lock.lock(); fieldCache[key] = t; lock.unlock()
         return t
     }
@@ -336,6 +364,12 @@ public final class CAMContext: @unchecked Sendable {
                   op.rasterAngle, op.slopeLimit, op.floorZ ?? 0, op.maxDepth ?? 0, t.cornerRadius, t.vAngle, t.tipDiameter, t.fluteLength,
                   op.tabs.width, op.tabs.height, op.tabs.minLoopLength] where !v.isFinite {
             throw bad("one of the settings is not a valid number.")
+        }
+        if let r = op.restFrom, op.kind.supportsRest {
+            guard r.diameter.isFinite, r.diameter >= 0.05, r.diameter <= 2 * (CAMContext.maxGridMargin - 4),
+                  r.cornerRadius.isFinite, r.vAngle.isFinite, r.tipDiameter.isFinite, r.shankDiameter.isFinite, r.fluteLength.isFinite else {
+                throw bad("the larger tool for rest machining is not valid.")
+            }
         }
         guard safeZ.isFinite, job.safeHeight > 0 else {
             throw CAMError.invalidSettings("The safe height must be greater than zero.")
@@ -395,7 +429,10 @@ public final class CAMContext: @unchecked Sendable {
             tp.warnings.append(String(format: "Cuts %.2f mm below the stock bottom%@.", -deepest,
                                       op.kind == .vcarve ? " — set a depth limit or use a wider-angle V-bit" : ""))
         }
-        if op.kind != .dowelHoles && stockTop - deepest > op.tool.fluteLength + 0.01 {
+        if let w = restWarning(op) { tp.warnings.append(w) }
+        // A wide shank is already kept off the model above the flutes (see `toolField`), so cutting deeper is fine.
+        if op.kind != .dowelHoles && !(op.tool.hasWideShank && op.kind != .vcarve && op.kind != .drill && op.kind != .cutout && op.kind != .facing)
+            && stockTop - deepest > op.tool.fluteLength + 0.01 {
             tp.warnings.append(String(format: "Cut depth %.1f mm exceeds the tool's flute length (%.1f mm).", stockTop - deepest, op.tool.fluteLength))
         }
         progress?(1)

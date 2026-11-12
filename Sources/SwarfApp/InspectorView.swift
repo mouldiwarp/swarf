@@ -415,8 +415,9 @@ struct OperationInspector: View {
                     if !tools.tools.contains(where: { $0.id == op.tool.id }) { Text(op.tool.name + " (project)").tag(op.tool.id) }
                     ForEach(tools.tools) { t in Text("T\(t.number) · \(t.name)").tag(t.id) }
                 }
-                LabeledContent("Geometry", value: String(format: "Ø%.3g mm %@, %d flute%@, %.0f mm flutes", op.tool.diameter,
-                                                          op.tool.kind.displayName, op.tool.flutes, op.tool.flutes == 1 ? "" : "s", op.tool.fluteLength))
+                LabeledContent("Geometry", value: String(format: "Ø%.3g mm %@, %d flute%@, %g mm flutes%@", op.tool.diameter,
+                                                          op.tool.kind.displayName, op.tool.flutes, op.tool.flutes == 1 ? "" : "s", op.tool.fluteLength,
+                                                          op.tool.hasWideShank ? String(format: ", Ø%g mm shank", op.tool.shankDiameter) : ""))
                 IntField(title: "Tool number (T)", value: b(\.tool.number), range: 1...99)
                 Button {
                     UserDefaults.standard.set(1, forKey: "settingsTab")
@@ -471,6 +472,7 @@ struct OperationInspector: View {
                 }
             }
             kindSpecific(op)
+            if op.kind.supportsRest { restSection(op) }
             if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve && op.kind != .drill && op.kind != .dowelHoles {
                 Section("Area") {
                     Picker("Boundary", selection: b(\.boundary)) {
@@ -498,6 +500,33 @@ struct OperationInspector: View {
         .formStyle(.grouped)
         // Developer hook for automated screenshots: -SwarfInspectorBottom YES opens the inspector scrolled to the end.
         .defaultScrollAnchor(UserDefaults.standard.bool(forKey: "SwarfInspectorBottom") ? .bottom : .top)
+    }
+
+    @ViewBuilder func restSection(_ op: CAMCore.Operation) -> some View {
+        let choices = model.restReferenceChoices(for: op)
+        Section("Rest machining") {
+            Toggle("Only cut what a larger tool left", isOn: Binding(get: { op.restFrom != nil }, set: { on in
+                b(\.restFrom).wrappedValue = on ? choices.first : nil
+            }))
+            .disabled(op.restFrom == nil && choices.isEmpty)
+            if let r = op.restFrom {
+                Picker("Larger tool", selection: Binding(get: { r.id }, set: { newID in
+                    if let t = choices.first(where: { $0.id == newID }) { b(\.restFrom).wrappedValue = t }
+                })) {
+                    if !choices.contains(where: { $0.id == r.id }) { Text(r.name).tag(r.id) }
+                    ForEach(choices) { t in Text("T\(t.number) · \(t.name)").tag(t.id) }
+                }
+                Text(String(format: "Cuts only where the Ø%g mm tool couldn't reach: inside corners, narrow slots and tight curves. Uses this operation's area, depth and stock to leave, so match them to the operation it follows.", r.diameter))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else if choices.isEmpty {
+                Text("No larger tool to follow. Use a smaller bit in this operation, or add larger tools to the library.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if op.tool.hasWideShank {
+                Text(String(format: "This bit's Ø%g mm shank is wider than its cutter, so beside a wall it only reaches %g mm (its flute length) below the top of the wall. Anything deeper is left, with a warning.", op.tool.shankDiameter, op.tool.fluteLength))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     @ViewBuilder func statusRow(_ op: CAMCore.Operation) -> some View {

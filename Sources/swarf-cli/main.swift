@@ -27,6 +27,8 @@ func usage(_ reason: String? = nil) -> Never {
       --keepout x0,y0,x1,y1 add a keep-out rectangle in stock coordinates (repeatable)
       --flip [mm]           two-sided job: dowel holes (mm into the spoilboard, default 5), side A, flip
                             about X, side B. With --ops, prefix side-B operations with b:, e.g. b:pocket
+      --rest <mm>           after each pocket and 3D roughing, add a rest pass with the starter flat end mill
+                            closest to <mm> that cuts only what the larger tool couldn't reach
       --test-cut [c,p,d]    test-cut mode: cutouts c mm deep, pockets and carving p mm, holes d mm
                             (default 8,4,4 for 9 mm MDF); output files are marked _TEST
     """)
@@ -58,6 +60,7 @@ if path.hasSuffix(".swarf") {
 }
 var outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 var opsList: [(OperationKind, MachiningSide)]? = nil
+var restDiameter: Double? = nil
 var simulate = false
 var layFlat = false
 var pngPath: String? = nil
@@ -129,6 +132,9 @@ while i < args.count {
     case "--vcarve-depth":
         guard let d = Double(next()), d.isFinite, d >= 0 else { usage("--vcarve-depth needs a depth in mm, 0 or more") }
         vSettings.maxDepth = d
+    case "--rest":
+        guard let d = Double(next()), d.isFinite, d > 0 else { usage("--rest needs a tool diameter in mm") }
+        restDiameter = d
     case "--ops":
         var kinds: [(OperationKind, MachiningSide)] = []
         for item in next().split(separator: ",") {
@@ -175,6 +181,21 @@ do {
     if !projectJob || !keepOuts.isEmpty { job.regions = keepOuts }
     if let d = flipDepth {
         for k in job.operations.indices where job.operations[k].kind == .dowelHoles { job.operations[k].dowelSettings.spoilboardDepth = d }
+    }
+    if let d = restDiameter, let small = library.closest(kind: .flat, diameter: d) {
+        var ops: [CAMCore.Operation] = []
+        for op in job.operations {
+            ops.append(op)
+            guard op.enabled, op.kind == .pocket || op.kind == .roughing, op.restFrom == nil, small.diameter < op.tool.diameter else { continue }
+            var r = op
+            r.id = UUID()
+            r.name = op.name + " rest"
+            r.tool = small
+            r.restFrom = op.tool
+            r.cutting = material.apply(small.defaults)
+            ops.append(r)
+        }
+        job.operations = ops
     }
     let ctx = CAMContext(raw: mesh, job: job)
     let s = ctx.placed.stockSize

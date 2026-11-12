@@ -164,7 +164,7 @@ open build/Swarf.app</pre>
     <li><b>Tool number:</b> the T number written to the G-code.</li>
   </ul>
   <p>The starter library includes 6 mm flat and ball-nose compression cutters (50 mm flutes), 1/8", 1/4" and 3 mm cutters, a 6 mm bull nose,
-    and 60° and 45° 6 mm V-bits. New cutouts, pockets and drilling use the 6 mm flat, 3D finishing uses the 6 mm ball, and V-carving uses the 60° V-bit.</p>
+    60° and 45° 6 mm V-bits, and 2 mm, 1 mm and 0.9 mm flat bits on 1/8" and 4 mm shanks for rest machining. New cutouts, pockets and drilling use the 6 mm flat, 3D finishing uses the 6 mm ball, and V-carving uses the 60° V-bit.</p>
   <div class="tip">When you edit a tool in the library, open projects that use it pick up the new geometry. Each operation keeps its own feeds and T number,
     so changing the library never silently changes the feeds of an operation you've already tuned.</div>
 </section>
@@ -201,6 +201,24 @@ open build/Swarf.app</pre>
     <li><b>Direction:</b> climb or conventional milling.</li>
   </ul>
   <p>Changes regenerate the toolpaths automatically. Each operation shows its estimated time, cutting length, depth range and any warnings.</p>
+  <h3>Rest machining: small bits for tight corners</h3>
+  <p>A 6 mm bit leaves a 3 mm radius in every inside corner and can't enter a slot narrower than itself. Rest machining
+    follows it with a smaller bit that cuts <i>only</i> what it left, so a rest pass takes minutes rather than re-cutting the
+    whole pocket.</p>
+  <ul>
+    <li>Select the pocket or 3D roughing operation and choose <b>+ ▸ Rest Clearing</b>. Swarf adds a copy right after it with
+      the largest flat bit in your library that is clearly smaller, set to follow the original tool. Change the bit in the copy's Tool section.</li>
+    <li>Or, in any pocket, 3D roughing or 3D finishing operation, turn on <b>Only cut what a larger tool left</b> under
+      <b>Rest machining</b> and pick the larger tool. A small ball nose can clean up concave curves after a larger one this way.</li>
+    <li>The rest pass uses its own operation's area, depth and stock to leave, so keep them the same as the operation it follows.</li>
+    <li>It works one corner or slot at a time, from the top down, and stays down between levels instead of lifting out each time.</li>
+    <li>After a simulation, Swarf suggests a rest pass when a pocket or roughing operation leaves material that a smaller
+      bit in your library could reach, with an <b>Add Rest Clearing</b> button.</li>
+  </ul>
+  <div class="tip">Small bits usually have a shank wider than the cutter: a 0.9 mm bit on a 1/8" or 4 mm shank. Swarf keeps
+    that shank off the walls above the flutes, so beside a wall the bit only reaches its flute length below the top of the
+    wall. Anything deeper is left, and the operation's warnings say how much. Enter your bits' real flute length and shank
+    diameter in the tool library; the starter values are typical, not measured.</div>
 </section>
 
 <section class="chapter">
@@ -363,7 +381,8 @@ open build/Swarf.app</pre>
   <p>Options: <code>--machine</code>, <code>--material</code>, <code>--quality draft|normal|fine</code>, <code>--lay-flat</code>, <code>--rotate x:90</code>,
     <code>--ops</code> (facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout), <code>--keepout x0,y0,x1,y1</code>,
     <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>, <code>--margin</code>,
-    <code>--flip [mm]</code> (two-sided job; prefix side-B operations with <code>b:</code>, e.g. <code>--ops dowelHoles,pocket,cutout,b:pocket</code>).</p>
+    <code>--flip [mm]</code> (two-sided job; prefix side-B operations with <code>b:</code>, e.g. <code>--ops dowelHoles,pocket,cutout,b:pocket</code>),
+    <code>--rest &lt;mm&gt;</code> (a rest pass with the flat bit closest to that size after each pocket and 3D roughing).</p>
 
   <h2 style="margin-top:16pt">19 · Keyboard shortcuts</h2>
   <table>

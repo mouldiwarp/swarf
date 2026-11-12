@@ -142,7 +142,9 @@ public enum Contours {
             var next = segsPerLevel[l]
             let pts = ptsPerLevel[l]
             var loops: [Loop] = []
-            while let (start, _) = next.first {
+            // Start each loop at its lowest edge id, not at whatever the dictionary hands out first: hashing is seeded
+            // per process, and the start point decides how a loop is simplified, so output would differ run to run.
+            for start in next.keys.sorted() where next[start] != nil {
                 var poly: [V2] = []
                 var cur = start
                 var guardCount = 0

@@ -42,6 +42,8 @@ post-processors for most popular hobby machines.
 - **Machine both sides** of a part, such as a guitar body with a carved top and control cavities in the
   back. Swarf drills dowel holes through the stock into the spoilboard, machines and cuts out side A,
   then machines side B after you roll the stock over onto dowels. Each step is exported as its own file.
+- **Rest machining**: follow a big bit with a small one that cuts only what the big one couldn't reach (square
+  inside corners, narrow slots, tight curves), in a few minutes instead of re-cutting the whole pocket.
 - **Protect features** with keep-out boxes you drag over the model. Click a box to select it, then
   drag it, nudge it with the arrow keys, or delete it with ⌫.
 - **Simulate** material removal, with a gouge check, a leftover-stock heat map, keep-out checks and a
@@ -112,6 +114,14 @@ In a two-sided job, pockets, 3D roughing and finishing, and drilling can also be
 (the back). Side B is never cut out, faced or engraved: the part is cut out from side A, and side B
 leaves the stock frame and the tabs alone.
 
+**Rest machining.** Pockets, 3D roughing and both 3D finishes can follow a larger tool and cut only the material it
+left. Choose **+ ▸ Rest Clearing**, or turn on *Only cut what a larger tool left* in any of those operations and pick
+the larger tool. The rest pass uses its own operation's area, depth and stock to leave, and works one corner or slot at
+a time from the top down. Small bits often have a shank wider than the cutter (a 0.9 mm bit on a 1/8" or 4 mm shank):
+Swarf keeps that shank off the walls above the flutes, so beside a wall the bit only reaches its flute length below the
+top of the wall, and it tells you how much it had to leave. After a simulation, Swarf suggests a rest pass when a
+clearing operation leaves material a smaller bit in your library could reach.
+
 Every operation has its own tool, spindle speed, feed, plunge rate, stepdown and stepover. You can
 also set climb or conventional cutting, stock to leave, and which keep-out regions apply.
 
@@ -124,7 +134,8 @@ risky. The library is saved in `~/Library/Application Support/Swarf/tools.json`.
 Fusion 360 tool libraries, and import or export Swarf's own JSON.
 
 The starter library includes 6 mm flat and ball-nose compression cutters, smaller flat and ball
-cutters, a bull nose, and 60° and 45° V-bits. **Measure your own bits and correct the library before
+cutters, a bull nose, 60° and 45° V-bits, and 2 mm, 1 mm and 0.9 mm flat bits on 1/8" and 4 mm shanks for rest
+machining. **Measure your own bits and correct the library before
 your first job.** If you edit a tool, open projects pick up the change, while each operation keeps
 its own feeds.
 
@@ -167,6 +178,7 @@ Given a `.swarf` project, the CLI uses its saved operations, regions, stock and 
 Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--lay-flat`,
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
 `--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`,
+`--rest <mm>` (add a rest pass with the flat bit closest to that size after each pocket and 3D roughing),
 `--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`), `--margin <mm>`,
 `--flip [spoilboard mm]` (two-sided job; with `--ops`, prefix side-B operations with `b:`, e.g.
 `--ops dowelHoles,pocket,cutout,b:pocket`).
@@ -193,7 +205,7 @@ running unattended, and wear eye and hearing protection.
 ## Contributing
 
 Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Planned work
-includes rest machining, a separate clearing tool for
+includes a separate clearing tool for
 V-carving, editable post-processors and a G-code panel linked to the 3D view.
 
 ## License
