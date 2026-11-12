@@ -12,8 +12,9 @@ public struct StockSimulator: Sendable {
     }
 
     public static func defaultResolution(for stockSize: V3) -> Double {
-        // At most ~25 million cells, however large the stock.
-        max(0.1, min(1.0, max(stockSize.x, stockSize.y) / 500), (stockSize.x * stockSize.y / 25_000_000).squareRoot())
+        // About 1400 cells along the longest side (0.3 mm on a guitar body), so cut walls look smooth in playback.
+        // Never finer than 0.1 mm or coarser than 1 mm, and at most ~25 million cells however large the stock.
+        max(0.1, min(1.0, max(stockSize.x, stockSize.y) / 1400), (stockSize.x * stockSize.y / 25_000_000).squareRoot())
     }
 
     /// Radial profile lookup (offset vs. squared distance) for sub-cell exact stamping.

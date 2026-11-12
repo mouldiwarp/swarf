@@ -120,7 +120,6 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var pathSegmentToVertex: [Int] = []
     private var overlayLineBuf: MTLBuffer?, overlayLineCount = 0  // rubber band, tool marker
     private var heightTex: MTLTexture?, devTex: MTLTexture?
-    private var heightIdx: MTLBuffer?, heightIdxCount = 0
     private var heightGrid = SIMD4<Float>(0, 0, 1, 0)
     private var heightSize = SIMD4<UInt32>(0, 0, 0, 0)
     var showModel = true, showStock = true, showPaths = true, showSim = false
@@ -347,15 +346,6 @@ final class Renderer: NSObject, MTKViewDelegate {
             d.usage = .shaderRead
             heightTex = device.makeTexture(descriptor: d)
             devTex = device.makeTexture(descriptor: d)
-            var idx: [UInt32] = []
-            idx.reserveCapacity((W - 1) * (H - 1) * 6)
-            for y in 0..<(H - 1) {
-                for x in 0..<(W - 1) {
-                    let i = UInt32(y * W + x)
-                    idx += [i, i + 1, i + UInt32(W), i + 1, i + UInt32(W) + 1, i + UInt32(W)]
-                }
-            }
-            heightIdx = buffer(idx); heightIdxCount = idx.count
         }
         g.data.withUnsafeBytes { heightTex!.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: W * 4) }
         var dev = analysis?.deviation ?? []
@@ -402,11 +392,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
         enc.setDepthStencilState(depthOn)
         // Opaque: model or simulated stock
-        if showSim, let ht = heightTex, let idx = heightIdx {
+        if showSim, let ht = heightTex, ht.width > 1, ht.height > 1 {
             enc.setRenderPipelineState(heightPipe)
             enc.setVertexTexture(ht, index: 0)
             enc.setVertexTexture(devTex, index: 1)
-            enc.drawIndexedPrimitives(type: .triangle, indexCount: heightIdxCount, indexType: .uint32, indexBuffer: idx, indexBufferOffset: 0)
+            // Six vertices per grid cell; the vertex shader picks each cell's triangulation.
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6 * (ht.width - 1) * (ht.height - 1))
         } else if showModel, let mb = modelBuf {
             enc.setRenderPipelineState(meshPipe)
             enc.setVertexBuffer(mb, offset: 0, index: 0)
@@ -495,7 +486,17 @@ enum Shaders {
     vertex VOut height_vs(texture2d<float> ht [[texture(0)]], texture2d<float> dev [[texture(1)]],
                           constant Uniforms& u [[buffer(1)]], uint vid [[vertex_id]]) {
         uint W = u.gridSize.x, H = u.gridSize.y;
-        uint x = vid % W, y = vid / W;
+        // Cell (qx, qy) is two triangles. Split it along the diagonal whose corners are closest in height, so a wall
+        // that crosses the grid at an angle is drawn as a sloping face rather than a row of saw teeth.
+        uint q = vid / 6, c = vid % 6;
+        uint qx = q % (W - 1), qy = q / (W - 1);
+        float h00 = ht.read(uint2(qx, qy)).r, h10 = ht.read(uint2(qx + 1, qy)).r;
+        float h01 = ht.read(uint2(qx, qy + 1)).r, h11 = ht.read(uint2(qx + 1, qy + 1)).r;
+        // Corner codes: bit 0 = +x, bit 1 = +y. Both splits keep counter-clockwise winding.
+        const uint mainDiag[6] = {0, 1, 3, 0, 3, 2};   // 00-11 diagonal
+        const uint otherDiag[6] = {0, 1, 2, 1, 3, 2};  // 10-01 diagonal
+        uint corner = abs(h00 - h11) <= abs(h10 - h01) ? mainDiag[c] : otherDiag[c];
+        uint x = qx + (corner & 1), y = qy + (corner >> 1);
         float h = ht.read(uint2(x, y)).r;
         float hl = ht.read(uint2(max(int(x) - 1, 0), y)).r, hr = ht.read(uint2(min(x + 1, W - 1), y)).r;
         float hd = ht.read(uint2(x, max(int(y) - 1, 0))).r, hu = ht.read(uint2(x, min(y + 1, H - 1))).r;
