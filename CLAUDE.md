@@ -5,6 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Swarf is a Mac-native (macOS 15+, Swift 6, SwiftPM only, no Xcode project) CAM app that turns an STL into
 G-code. Its default target is the Ooznest WorkBee Z1+ on Duet/RepRapFirmware. MIT licensed.
 
+Open work and loose ends are listed in `ROADMAP.md`. Check it when starting work, and update it when an item
+is done or a new one comes up.
+
 ## Commands
 
 ```bash
