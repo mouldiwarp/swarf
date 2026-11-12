@@ -360,14 +360,16 @@ public final class CAMContext: @unchecked Sendable {
                 throw bad("the stepover is too small (it must be at least 0.02 mm).")
             }
         }
-        for v in [op.stockToLeaveXY, op.stockToLeaveZ, op.boundaryMargin, op.bottomSkin, op.facingDepth, op.throughDepth,
+        let numbers: [Double] = [op.stockToLeaveXY, op.stockToLeaveZ, op.boundaryMargin, op.bottomSkin, op.facingDepth, op.throughDepth,
                   op.rasterAngle, op.slopeLimit, op.floorZ ?? 0, op.maxDepth ?? 0, t.cornerRadius, t.vAngle, t.tipDiameter, t.fluteLength,
-                  op.tabs.width, op.tabs.height, op.tabs.minLoopLength] where !v.isFinite {
+                  op.tabs.width, op.tabs.height, op.tabs.minLoopLength]
+        for v in numbers where !v.isFinite {
             throw bad("one of the settings is not a valid number.")
         }
         if let r = op.restFrom, op.kind.supportsRest {
-            guard r.diameter.isFinite, r.diameter >= 0.05, r.diameter <= 2 * (CAMContext.maxGridMargin - 4),
-                  r.cornerRadius.isFinite, r.vAngle.isFinite, r.tipDiameter.isFinite, r.shankDiameter.isFinite, r.fluteLength.isFinite else {
+            let sizes: [Double] = [r.diameter, r.cornerRadius, r.vAngle, r.tipDiameter, r.shankDiameter, r.fluteLength]
+            let maxDiameter: Double = 2 * (CAMContext.maxGridMargin - 4)
+            guard sizes.allSatisfy({ $0.isFinite }), r.diameter >= 0.05, r.diameter <= maxDiameter else {
                 throw bad("the larger tool for rest machining is not valid.")
             }
         }
