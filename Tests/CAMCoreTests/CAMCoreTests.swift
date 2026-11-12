@@ -135,6 +135,46 @@ import simd
         #expect(a.leftoverCells < 40)
     }
 
+    /// The pocket must come out at its true size. On the grid alone the wall pass stopped short of the walls by an
+    /// amount that grew with depth (about 0.5 mm a side on a 20 mm deep guitar neck pocket).
+    @Test func pocketWallsAreExactAtEveryDepth() throws {
+        // 40 × 30 plate with a 24 × 14 pocket 12 mm deep; draft grid and an odd margin put the walls between grid nodes.
+        let mesh = STL.merge([
+            STL.box(V3(40, 30, 3)),
+            STL.box(V3(40, 8, 12), at: V3(0, 0, 3)), STL.box(V3(40, 8, 12), at: V3(0, 22, 3)),
+            STL.box(V3(8, 14, 12), at: V3(0, 8, 3)), STL.box(V3(8, 14, 12), at: V3(32, 8, 3)),
+        ])
+        var job = Job()
+        job.quality = .draft
+        job.stock.marginXY = 5.137
+        let tool = lib.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .pocket, tool: tool, material: material())
+        op.boundary = .insideSilhouette
+        job.operations = [op]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let tp = try ctx.generate(op)
+        let o = ctx.placed.modelBounds.min
+        let want = (x0: o.x + 8 + 3, x1: o.x + 32 - 3, y0: o.y + 8 + 3, y1: o.y + 22 - 3)
+        var levels: [Double: (Double, Double, Double, Double)] = [:]
+        var prev = tp.start
+        for m in tp.moves {
+            defer { prev = m.to }
+            // Flat passes only: ramps change Z as they go.
+            guard m.kind != .rapid, m.to.z < ctx.stockTop - 0.5, abs(m.to.z - prev.z) < 1e-6 else { continue }
+            let z = (m.to.z * 1000).rounded() / 1000
+            let e = levels[z] ?? (.infinity, -.infinity, .infinity, -.infinity)
+            levels[z] = (min(e.0, m.to.x), max(e.1, m.to.x), min(e.2, m.to.y), max(e.3, m.to.y))
+        }
+        #expect(levels.count >= 5)
+        for (z, e) in levels {
+            let err = max(abs(e.0 - want.x0), abs(e.1 - want.x1), abs(e.2 - want.y0), abs(e.3 - want.y1))
+            #expect(err < 0.01, "at z \(z) the wall pass is \(err) mm off (grid \(ctx.res) mm)")
+        }
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
+    }
+
     @Test func cutoutHasTabsAtHeight() async throws {
         var job = Job()
         job.quality = .draft
@@ -424,6 +464,40 @@ import simd
     }
 }
 
+@Suite struct SmoothOutlineTests {
+    /// A finely faceted round part: the cutout must sit on the exact offset circle, not on the grid's staircase,
+    /// and come out as arcs rather than a cloud of tiny direction-changing segments.
+    @Test func cutoutFollowsTheTrueOutline() throws {
+        let radius = 20.0
+        let mesh = STL.merge([STL.dome(radius: radius, segments: 360, rings: 8, center: V2(40, 40)),
+                              STL.box(V3(1, 1, 1), at: V3(40, 40, -10))])  // keeps the dome off the bed
+        let tool = ToolLibrary.starter.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .cutout, tool: tool)
+        op.tabs.enabled = false
+        var job = Job()
+        job.operations = [op]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let b = ctx.placed.modelBounds
+        let c = V2((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2)
+        let loops = ctx.cutoutLoops(op)
+        #expect(loops.count == 1)
+        let want = radius + tool.radius
+        let worst = loops.flatMap(\.points).map { abs($0.dist(c) - want) }.max() ?? 1
+        #expect(worst < 0.02, "outline is \(worst) mm off the exact offset (grid is \(ctx.res) mm)")
+
+        let tp = try ctx.generate(op)
+        let post = PostProcessor(profile: .workbeeRRF, origin: ctx.placed.originPoint(job.origin), safeZ: ctx.safeZ,
+                                 jobName: "t", stockSize: ctx.placed.stockSize)
+        let lines = post.process([tp]).flatMap { $0.content.split(separator: "\n") }
+        let arcs = lines.filter { $0.hasPrefix("G2") || $0.hasPrefix("G3") }.count
+        let flatG1 = lines.filter { $0.hasPrefix("G1") && !$0.contains("Z") }.count
+        #expect(arcs > flatG1, "\(arcs) arcs vs \(flatG1) planar G1 moves")
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
+    }
+}
+
 @Suite struct DrillTests {
     /// 60 × 20 × 10 plate with three holes in 20 mm cells: Ø6 through, Ø6 blind (floor at z 5), Ø10 through.
     static func plate() -> Mesh {
@@ -462,6 +536,23 @@ import simd
         #expect(abs(holes[0].diameter - 6) < 0.3 && holes[0].floorZ == nil)
         #expect(abs(holes[1].diameter - 6) < 0.3 && abs((holes[1].floorZ ?? 0) - (ctx.stockTop - 5)) < 0.05)
         #expect(abs(holes[2].diameter - 10) < 0.3 && holes[2].floorZ == nil)
+    }
+
+    /// The grid only locates a hole to a fraction of a cell; the drill must still sit on the true centre.
+    @Test func holeCentresAreExact() {
+        // A coarse grid and an odd stock margin put the hole centres between grid nodes.
+        var job = Job()
+        job.quality = .draft
+        job.stock.marginXY = 5.137
+        let ctx = CAMContext(raw: Self.plate(), job: job)
+        let holes = ctx.detectHoles().sorted { $0.center.x < $1.center.x }
+        #expect(holes.count == 3)
+        let off = ctx.placed.modelBounds.min
+        for (k, h) in holes.enumerated() {
+            let want = V2(off.x + Double(k) * 20 + 10, off.y + 10)
+            #expect(h.center.dist(want) < 0.005, "hole \(k) is \(h.center.dist(want)) mm off-centre (grid \(ctx.res) mm)")
+        }
+        #expect(abs(holes[0].diameter - 6) < 0.01 && abs(holes[2].diameter - 10) < 0.01)
     }
 
     @Test func pecksMatchingHoles() throws {

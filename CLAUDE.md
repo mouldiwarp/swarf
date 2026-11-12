@@ -47,6 +47,12 @@ Three targets share one engine:
 5. Strategies are `CAMContext` extensions: Operations.swift (facing, pocket+roughing via `clearing`, parallel,
    waterline, cutout with tabs), VCarve.swift, Drill.swift. They read the tool field, build contours (marching
    squares in Contours.swift, Euclidean distance transforms in Grid.swift), and emit `Move`s via `PathBuilder`.
+   Grid contours are only accurate to about a cell, and on tall walls the error changes with depth. Wherever exact
+   size matters, contour points are moved onto the true geometry with `Footprint` (Silhouette.swift). It gives
+   the exact XY distance to the projected mesh, optionally only for material above a Z (`minZ`). It is used for
+   cutout outlines, the wall pass of flat-end-mill pockets, and hole centres and diameters in Drill.swift.
+   `refine` caps each move at two cells and takes an `accept` check (keep-outs, boundary). Anything new that
+   produces finished walls should use it too, or parts come out a few tenths undersize.
 6. `CAMContext.generate(op)` is the single entry point: it validates settings, dispatches by
    `OperationKind`, rejects non-finite moves, and appends warnings (feeds, flute length, test-cut, below
    stock). `JobTemplates.fullProcessing` (Templates.swift) picks operations from model traits.

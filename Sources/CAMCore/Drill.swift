@@ -78,7 +78,58 @@ extension CAMContext {
                 found.append(hole)
             }
         }
-        return found
+        var footprints: [Double: Footprint] = [:]
+        return found.map { refined($0, footprints: &footprints) }
+    }
+
+    /// Exact centre and diameter, measured on the hole wall in the model itself. The grid estimate can be a fraction of
+    /// a cell off, which would put the drill off-centre and shave one side of the hole.
+    func refined(_ hole: Hole, footprints: inout [Double: Footprint]) -> Hole {
+        let fp: Footprint
+        if let f = footprints[hole.rimZ] { fp = f } else {
+            fp = Footprint(mesh: placed.mesh, minZ: hole.rimZ - 0.05)
+            footprints[hole.rimZ] = fp
+        }
+        let r0 = hole.diameter / 2
+        let reach = 2 * r0 + 2 * res
+        // March outward in many directions until each ray meets the wall. The footprint distance is exact, so each
+        // step can safely be as long as the distance to the nearest material.
+        var wall: [V2] = []
+        let n = 96
+        for k in 0..<n {
+            let a = Double(k) / Double(n) * 2 * .pi
+            let d = V2(cos(a), sin(a))
+            var t = 0.0
+            for _ in 0..<80 {
+                guard let hit = fp.nearest(hole.center + d * t, within: reach) else { t = .infinity; break }
+                if hit.dist < 1e-5 { break }
+                t += hit.dist
+                if t > reach { break }
+            }
+            if t.isFinite, t <= reach { wall.append(hole.center + d * t) }
+        }
+        guard wall.count >= n * 3 / 4 else { return hole }
+        // Least-squares circle (Kåsa), centred on the mean for numerical stability.
+        let m = wall.reduce(V2.zero, +) / Double(wall.count)
+        var sxx = 0.0, sxy = 0.0, syy = 0.0, sx3 = 0.0, sy3 = 0.0, sxyy = 0.0, sxxy = 0.0
+        for p in wall {
+            let u = p.x - m.x, v = p.y - m.y
+            sxx += u * u; sxy += u * v; syy += v * v
+            sx3 += u * u * u; sy3 += v * v * v; sxyy += u * v * v; sxxy += u * u * v
+        }
+        let det = sxx * syy - sxy * sxy
+        guard abs(det) > 1e-12 else { return hole }
+        let bx = 0.5 * (sx3 + sxyy), by = 0.5 * (sy3 + sxxy)
+        let c = m + V2((bx * syy - by * sxy) / det, (by * sxx - bx * sxy) / det)
+        let radii = wall.map { $0.dist(c) }
+        let r = radii.reduce(0, +) / Double(radii.count)
+        // Only trust a fit that agrees with the grid estimate and really is round.
+        guard c.dist(hole.center) <= 2 * res, abs(2 * r - hole.diameter) <= 2 * res,
+              radii.allSatisfy({ abs($0 - r) <= max(0.1, 0.05 * r) }) else { return hole }
+        var h = hole
+        h.center = c
+        h.diameter = 2 * r
+        return h
     }
 
     func drill(_ op: Operation, progress: ProgressHandler?) throws -> Toolpath {

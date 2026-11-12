@@ -146,7 +146,21 @@ extension CAMContext {
         var b = builder(op)
         let floor = floorZ(op) + op.stockToLeaveZ
         let sd = max(0.05, op.cutting.stepdown)
-        let so = min(op.stepover, op.tool.diameter * 0.95)
+        // Pockets with a flat end mill put the wall pass on the exact model wall (see below). That pass can sit up to
+        // two cells further out than the grid says, so keep the next pass close enough to leave no ridge.
+        let exactWalls = op.kind == .pocket && op.tool.kind == .flat
+        let so = min(op.stepover, op.tool.diameter * 0.95 - (exactWalls ? 2 * T.res : 0))
+        let wallOffset = op.tool.radius + op.stockToLeaveXY
+        var footprints: [Double: Footprint] = [:]
+        func wallAllowed(_ p: V2, _ z: Double) -> Bool {
+            if isForbiddenXY(p, z: z, op: op, inflate: op.tool.radius) { return false }
+            let s = placed.stockSize, R = op.tool.radius
+            switch op.boundary {
+            case .stock: return p.x >= -R && p.y >= -R && p.x <= s.x + R && p.y <= s.y + R
+            case .silhouette: return Double(silhouetteDistance.sample(p)) <= op.boundaryMargin + wallOffset
+            case .insideSilhouette: return silhouetteDistance.sample(p) <= 0
+            }
+        }
         var levels: [Double] = []
         var z = stockTop - sd
         while z > floor + 1e-6 { levels.append(z); z -= sd }
@@ -190,7 +204,19 @@ extension CAMContext {
             }
             // Offsets: k=0 from the exact tool field, k>=1 from the distance field.
             var loopsByK: [(Int, Loop)] = []
-            for l in Contours.isolines(negT, levels: [-zf])[0] { loopsByK.append((0, l)) }
+            // The grid puts the wall pass up to a cell or so short of the wall, and by an amount that changes with depth
+            // (the contour is interpolated across the wall's full height). For a flat end mill the exact limit is
+            // simple: stay `wallOffset` from all material that stands above this level.
+            let fp: Footprint? = exactWalls ? {
+                if let f = footprints[z] { return f }
+                let f = Footprint(mesh: placed.mesh, minZ: z + 0.01)
+                footprints[z] = f
+                return f
+            }() : nil
+            for l in Contours.isolines(negT, levels: [-zf])[0] {
+                let wall = fp?.refine(l, level: wallOffset, maxShift: 2 * T.res) { wallAllowed($0, z) } ?? l
+                loopsByK.append((0, wall))
+            }
             var offs: [Float] = []
             var k = 1
             while Double(k) * so < maxD { offs.append(Float(Double(k) * so)); k += 1 }
@@ -248,9 +274,14 @@ extension CAMContext {
                     if !firstInComp && abs(b.pos.z - z) < 1e-6 && linkLen < max(so * 2.5, op.tool.diameter) {
                         // Stay down if the straight link stays inside the allowed region.
                         let n = max(2, Int(ceil(linkLen / T.res)))
+                        let end = loop.points[0]
                         linked = (0...n).allSatisfy { i in
-                            let p = here + (loop.points[0] - here) * (Double(i) / Double(n))
-                            return D.nearest(p) > 0 && T.sample(p) <= zf
+                            let p = here + (end - here) * (Double(i) / Double(n))
+                            if D.nearest(p) > 0 && T.sample(p) <= zf { return true }
+                            // Near an exact wall pass the grid is too cautious; ask the model itself.
+                            guard let fp else { return false }
+                            let clear = (fp.nearest(p, within: wallOffset)?.dist ?? .infinity) >= wallOffset - 1e-6
+                            return clear && wallAllowed(p, z)
                         }
                     }
                     let path = ClosedPath(loop)
@@ -440,6 +471,7 @@ extension CAMContext {
         let r = Float(op.tool.radius + op.stockToLeaveXY + extra)
         let g = silhouetteDistance
         let loops = Contours.isolines(g, levels: [r])[0]
+        let fp = footprint
         let edge = g.res * 2
         let maxX = g.origin.x + Double(g.width - 1) * g.res, maxY = g.origin.y + Double(g.height - 1) * g.res
         return loops.compactMap { l -> Loop? in
@@ -448,7 +480,9 @@ extension CAMContext {
             if l.perimeter < op.tool.diameter { return nil }
             let isHole = l.signedArea > 0  // free space on the left => CCW loops sit inside holes
             if isHole && !op.cutHoles { return nil }
-            return Polyline.simplify(loop: l, tolerance: 0.01)
+            // The grid contour wobbles by up to half a cell; put it on the exact offset of the model outline.
+            let exact = fp.refine(l, level: Double(r), maxShift: 2 * g.res)
+            return Polyline.simplify(loop: exact, tolerance: 0.01)
         }
     }
 

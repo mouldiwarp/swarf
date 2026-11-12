@@ -30,7 +30,17 @@ public final class CAMContext: @unchecked Sendable {
     public let flatLevels: [Double]
 
     private var fieldCache: [String: Grid2D] = [:]
+    private var footprintCache: Footprint?
     private let lock = NSLock()
+
+    /// Exact model footprint for sub-cell accurate outlines (built on first use).
+    var footprint: Footprint {
+        lock.lock(); defer { lock.unlock() }
+        if let f = footprintCache { return f }
+        let f = Footprint(mesh: placed.mesh)
+        footprintCache = f
+        return f
+    }
 
     public var stockTop: Double { placed.stockTop }
     public var safeZ: Double { placed.stockTop + job.safeHeight }
