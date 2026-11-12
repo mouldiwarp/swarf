@@ -158,8 +158,11 @@ first cut.
 ```bash
 swift build -c release
 .build/release/swarf-cli model.stl --out ./gcode --simulate --png preview.png
+.build/release/swarf-cli MyGuitar.swarf --out ./gcode --simulate   # a saved project, machined as saved
 .build/release/swarf-cli --list-machines
 ```
+
+Given a `.swarf` project, the CLI uses its saved operations, regions, stock and work zero.
 
 Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--lay-flat`,
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,

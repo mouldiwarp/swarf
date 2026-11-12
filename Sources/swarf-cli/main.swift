@@ -7,7 +7,8 @@ import Foundation
 func usage(_ reason: String? = nil) -> Never {
     if let reason { FileHandle.standardError.write(Data("swarf-cli: \(reason)\n\n".utf8)) }
     print("""
-    usage: swarf-cli <model.stl> [options]
+    usage: swarf-cli <model.stl | project.swarf> [options]
+      A .swarf project is machined as saved (its operations, regions, stock and origin); options still apply.
       --machine <id>        post-processor (default: workbee-z1plus-rrf); --list-machines to see all
       --material <id>       mdf, plywood, softwood, hardwood, acrylic, hdpe, foam, aluminium
       --quality <q>         draft | normal | fine
@@ -36,10 +37,23 @@ if args.contains("--list-machines") {
     exit(0)
 }
 if args.contains("--help") || args.contains("-h") { usage() }
-guard let path = args.first, !path.hasPrefix("--") else { usage(args.isEmpty ? nil : "the first argument must be the STL file") }
+guard var path = args.first, !path.hasPrefix("--") else { usage(args.isEmpty ? nil : "the first argument must be the STL file") }
 args.removeFirst()
 
 var job = Job()
+var projectJob = false
+var jobName = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+if path.hasSuffix(".swarf") {
+    let dir = URL(fileURLWithPath: path)
+    do {
+        job = try JSONDecoder().decode(Job.self, from: Data(contentsOf: dir.appendingPathComponent("job.json")))
+    } catch { usage("can't read \(dir.lastPathComponent)/job.json: \(error.localizedDescription)") }
+    if let n = try? String(contentsOf: dir.appendingPathComponent("name.txt"), encoding: .utf8), !n.isEmpty {
+        jobName = n.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    path = dir.appendingPathComponent("model.stl").path
+    projectJob = true
+}
 var outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 var opsList: [(OperationKind, MachiningSide)]? = nil
 var simulate = false
@@ -151,10 +165,10 @@ do {
             op.machiningSide = side
             return op
         }
-    } else {
+    } else if !projectJob {
         job.operations = JobTemplates.fullProcessing(probe, library: library, material: material)
     }
-    job.regions = keepOuts
+    if !projectJob || !keepOuts.isEmpty { job.regions = keepOuts }
     if let d = flipDepth {
         for k in job.operations.indices where job.operations[k].kind == .dowelHoles { job.operations[k].dowelSettings.spoilboardDepth = d }
     }
@@ -170,7 +184,7 @@ do {
         for w in tp.warnings { print("    ⚠︎ \(w)") }
     }
     let post = PostProcessor(profile: profile, origin: ctx.placed.originPoint(job.origin), safeZ: ctx.safeZ,
-                             jobName: URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent, stockSize: s,
+                             jobName: jobName, stockSize: s,
                              testCut: job.activeTestCut)
     for w in post.validate(out.toolpaths) { print("  ⚠︎ \(w)") }
     try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)

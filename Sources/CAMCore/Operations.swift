@@ -216,7 +216,7 @@ extension CAMContext {
             }() : nil
             for l in Contours.isolines(negT, levels: [-zf])[0] {
                 let wall = fp?.refine(l, level: wallOffset, maxShift: 2 * T.res) { wallAllowed($0, z) } ?? l
-                loopsByK.append((0, wall))
+                loopsByK.append((0, straightenGridRuns(wall, exactAt: wallOffset, footprint: fp, field: T, isWall: true)))
             }
             var offs: [Float] = []
             var k = 1
@@ -230,7 +230,7 @@ extension CAMContext {
                         // an exact offset of it: put it there. Points limited by something else (a boundary, a keep-out)
                         // are too far from that offset and keep their grid position.
                         let exact = fp?.refine(l, level: wallOffset + Double(offs[ki]), maxShift: 2 * T.res) { wallAllowed($0, z) && T.sample($0) <= zf } ?? l
-                        loopsByK.append((ki + 1, exact))
+                        loopsByK.append((ki + 1, straightenGridRuns(exact, exactAt: wallOffset + Double(offs[ki]), footprint: fp, field: T, isWall: false)))
                     }
                 }
             }
@@ -327,6 +327,77 @@ extension CAMContext {
         var tp = makeToolpath(op, b)
         if tp.moves.count < 3 { tp.warnings.append("Nothing to clear with this tool and boundary.") }
         return tp
+    }
+
+    /// Straightens the stretches of a clearing pass that still follow the grid.
+    ///
+    /// Where a pass is limited by something with no exact geometry (a hole in the silhouette, a keep-out, the side-B
+    /// frame), its contour is traced from a yes/no mask and comes out as a staircase of cells: every few tenths of a
+    /// millimetre the direction flips, and the machine brakes and accelerates at each one. Inner passes have the same
+    /// wobble from the distance field they are traced from. Those stretches are averaged over a few neighbours (moving
+    /// each point less than half a cell) and replaced by the longest chords that stay close to both the averaged and the
+    /// original points (within 0.75 cells of the originals).
+    ///
+    /// On the wall pass (`isWall`) only points next to a forbidden cell are straightened; the rest are on model walls
+    /// and stay put. A chord there can reach up to 0.75 cells past the grid's contour, into a margin that is always
+    /// spare: keep-outs are already inflated by a cell, and the silhouette, stock and side-B frame limits are waste or
+    /// have their own margin. Points already on the exact offset (`exactAt` mm from `footprint`) are always kept.
+    func straightenGridRuns(_ loop: Loop, exactAt level: Double, footprint fp: Footprint?, field T: Grid2D, isWall: Bool) -> Loop {
+        let src = loop.points
+        let n = src.count
+        guard n >= 5 else { return loop }
+        let tol = T.res * 0.5
+        func exact(_ p: V2) -> Bool {
+            guard let fp, let d = fp.nearest(p, within: level + 1)?.dist else { return false }
+            return abs(d - level) < 1e-3
+        }
+        func nearForbidden(_ p: V2) -> Bool {
+            let c = T.cellCoord(p)
+            let x0 = Int(c.x.rounded()), y0 = Int(c.y.rounded())
+            for y in (y0 - 1)...(y0 + 1) {
+                for x in (x0 - 1)...(x0 + 1) where x < 0 || y < 0 || x >= T.width || y >= T.height || T[x, y] >= Grid2D.forbidThreshold {
+                    return true
+                }
+            }
+            return false
+        }
+        let free: [Bool] = src.map { p in !exact(p) && (!isWall || nearForbidden(p)) }
+        if !free.contains(true) { return loop }
+        // Start at a kept point when there is one, so a run never wraps past the start.
+        let s0 = free.firstIndex(of: false) ?? 0
+        let p = Array(src[s0...] + src[..<s0]), movable = Array(free[s0...] + free[..<s0])
+        // Chord ends on raw staircase corners would still zigzag, so first average each movable point with its neighbours.
+        var q = p
+        for i in 0..<n where movable[i] {
+            var sum = V2.zero
+            for k in -3...3 { sum += p[(i + k + n) % n] }
+            var d = sum / 7 - p[i]
+            let l = simd_length(d)
+            if l > 0.8 * tol { d *= 0.8 * tol / l }
+            q[i] = p[i] + d
+        }
+        func chordOK(_ i: Int, _ j: Int) -> Bool {
+            let a = q[i], b = q[j % n]
+            let ab = b - a, len = simd_length(ab)
+            guard len > 1e-9 else { return false }
+            func off(_ v: V2) -> Double { let d = v - a; return abs(ab.x * d.y - ab.y * d.x) / len }
+            for k in (i + 1)..<j {
+                if off(q[k]) > 0.7 * tol || off(p[k]) > 1.5 * tol { return false }
+                let t = simd_dot(q[k] - a, ab) / (len * len)
+                if t < -1e-6 || t > 1 + 1e-6 { return false }
+            }
+            return true
+        }
+        var out: [V2] = [q[0]]
+        var i = 0
+        while i < n {
+            var j = i + 1
+            // Extend the chord over movable points only; stop at a kept point.
+            while j < n, movable[j], j - i < 400, chordOK(i, j + 1) { j += 1 }
+            if j < n { out.append(q[j]) }
+            i = j
+        }
+        return out.count >= 3 ? Loop(out) : loop
     }
 
     // MARK: Parallel (raster) finishing

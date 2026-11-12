@@ -175,10 +175,10 @@ import simd
         #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
     }
 
-    /// Base plate with a ring wall standing on it: a round cavity of radius `inner`, centred at (30, 30).
-    static func roundCavity(inner: Double = 18, outer: Double = 26, height: Double = 12, segments: Int = 96) -> Mesh {
+    /// Flat-topped ring (annulus) from z0 to z1, centred at (30, 30): top face and both walls.
+    static func ring(inner: Double, outer: Double, z0: Float, z1: Float, segments: Int = 96) -> [Triangle] {
         var tris: [Triangle] = []
-        let c = V2(30, 30), z0: Float = 3, z1 = Float(3 + height)
+        let c = V2(30, 30)
         func p(_ r: Double, _ i: Int, _ z: Float) -> SIMD3<Float> {
             let a = Double(i) / Double(segments) * 2 * .pi
             return SIMD3(Float(c.x + r * cos(a)), Float(c.y + r * sin(a)), z)
@@ -189,31 +189,26 @@ import simd
             tris += [Triangle(p(inner, i, z0), p(inner, i, z1), p(inner, j, z1)), Triangle(p(inner, i, z0), p(inner, j, z1), p(inner, j, z0))]
             tris += [Triangle(p(outer, i, z0), p(outer, j, z1), p(outer, i, z1)), Triangle(p(outer, i, z0), p(outer, j, z0), p(outer, j, z1))]
         }
-        return STL.merge([STL.box(V3(60, 60, 3)), Mesh(triangles: tris)])
+        return tris
     }
 
-    @Test func pocketPassesFollowCurvesSmoothly() throws {
-        // Every concentric pass in a round cavity should be a smooth curve. Passes traced from the grid wobble: their
-        // turning direction flips back and forth, which makes the machine brake and accelerate at every segment.
-        var job = Job()
-        job.quality = .draft
-        job.stock.marginXY = 5.137
-        let tool = lib.closest(kind: .flat, diameter: 6)!
-        var op = Operation(kind: .pocket, tool: tool, material: material())
-        op.boundary = .insideSilhouette
-        job.operations = [op]
-        let ctx = CAMContext(raw: Self.roundCavity(), job: job)
-        let tp = try ctx.generate(op)
-        // Look inside the cavity only (the job also clears the moat around the ring, whose loops have real corners),
-        // and only along passes: the short step-in links between concentric passes are real corners too.
-        let centre = ctx.placed.modelBounds.min.xy + V2(30, 30)
+    /// Base plate with a ring wall standing on it: a round cavity of radius `inner`, centred at (30, 30).
+    static func roundCavity(inner: Double = 18, outer: Double = 26, height: Double = 12) -> Mesh {
+        STL.merge([STL.box(V3(60, 60, 3)), Mesh(triangles: ring(inner: inner, outer: outer, z0: 3, z1: Float(3 + height)))])
+    }
+
+    /// Turns of more than 1° along flat cutting passes between `minR` and `maxR` from `centre`, and how many of them
+    /// reverse the previous turn's direction. Moves that step between passes (radius changes by 0.5 mm or more) are
+    /// links, not passes, and are skipped.
+    static func wobble(_ tp: Toolpath, _ ctx: CAMContext, centre: V2, minR: Double = 0, maxR: Double) -> (turns: Int, flips: Int, moves: Int) {
         var turns = 0, flips = 0, flatMoves = 0
         var prev = tp.start, prevDir: Double? = nil, prevTurn = 0.0
         for m in tp.moves {
             defer { prev = m.to }
             let d = m.to.xy - prev.xy
+            let r = simd_length(m.to.xy - centre)
             guard m.kind == .feed, m.to.z < ctx.stockTop - 0.5, abs(m.to.z - prev.z) < 1e-6, simd_length(d) > 1e-6,
-                  simd_length(m.to.xy - centre) < 18, abs(simd_length(m.to.xy - centre) - simd_length(prev.xy - centre)) < 0.5 else {
+                  r < maxR, r > minR, abs(r - simd_length(prev.xy - centre)) < 0.5 else {
                 prevDir = nil; prevTurn = 0; continue
             }
             flatMoves += 1
@@ -230,8 +225,52 @@ import simd
             }
             prevDir = a
         }
-        #expect(flatMoves > 50)
-        #expect(Double(flips) < Double(turns) * 0.05, "\(flips) of \(turns) turns reverse direction")
+        return (turns, flips, flatMoves)
+    }
+
+    @Test func pocketPassesAroundAThroughHoleAreSmooth() throws {
+        // A recessed floor with a round through-hole: with the "inside model" boundary the hole is out of bounds, and
+        // the passes around it are limited by a yes/no mask rather than a model wall. Traced from the grid they are a
+        // staircase; they must come out smooth, reaching at most 0.75 cells past the grid's limit.
+        let mesh = Mesh(triangles: Self.ring(inner: 10, outer: 28, z0: 0, z1: 3) + Self.ring(inner: 28, outer: 34, z0: 0, z1: 15))
+        var job = Job()
+        job.quality = .draft
+        job.stock.marginXY = 5.137
+        let tool = lib.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .pocket, tool: tool, material: material())
+        op.boundary = .insideSilhouette
+        job.operations = [op]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let tp = try ctx.generate(op)
+        // The mesh's bounds start 34 mm before the ring's centre.
+        let centre = ctx.placed.modelBounds.min.xy + V2(34, 34)
+        let w = Self.wobble(tp, ctx, centre: centre, minR: 12, maxR: 18)
+        #expect(w.moves > 20)
+        #expect(Double(w.flips) < Double(w.turns) * 0.05, "\(w.flips) of \(w.turns) turns reverse direction")
+        // The tool centre stays a tool radius outside the hole (to within the grid's reach plus 0.75 cells).
+        let closest = tp.moves.filter { $0.kind != .rapid && $0.to.z < ctx.stockTop - 0.5 }.map { simd_length($0.to.xy - centre) }.min() ?? 0
+        #expect(closest > 13 - 1.75 * ctx.res, "comes within \(closest) mm of the hole centre")
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
+    }
+
+    @Test func pocketPassesFollowCurvesSmoothly() throws {
+        // Every concentric pass in a round cavity should be a smooth curve. Passes traced from the grid wobble: their
+        // turning direction flips back and forth, which makes the machine brake and accelerate at every segment.
+        var job = Job()
+        job.quality = .draft
+        job.stock.marginXY = 5.137
+        let tool = lib.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .pocket, tool: tool, material: material())
+        op.boundary = .insideSilhouette
+        job.operations = [op]
+        let ctx = CAMContext(raw: Self.roundCavity(), job: job)
+        let tp = try ctx.generate(op)
+        // Inside the cavity only: the job also clears the moat around the ring, whose loops have real corners.
+        let w = Self.wobble(tp, ctx, centre: ctx.placed.modelBounds.min.xy + V2(30, 30), maxR: 18)
+        #expect(w.moves > 50)
+        #expect(Double(w.flips) < Double(w.turns) * 0.05, "\(w.flips) of \(w.turns) turns reverse direction")
         var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
         sim.run([tp])
         let a = sim.analyze(model: ctx.placed)

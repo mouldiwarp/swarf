@@ -17,6 +17,7 @@ swift test -c release --filter DrillTests/pecksMatchingHoles   # one test
 scripts/build-app.sh [debug|release]                   # builds build/Swarf.app (needed for document types to register)
 swift build -c release && .build/release/swarf-cli Tests/Fixtures/dome_relief.stl --out out --simulate
 .build/release/swarf-cli model.stl --png preview.png [--png-no-paths]   # top view: gouges red, leftover blue
+.build/release/swarf-cli ~/Desktop/Project.swarf --out out --simulate   # reproduce a user's project exactly
 scripts/make-guide.sh                                  # docs/guide/user-guide.html -> docs/Swarf-User-Guide.pdf (headless Chrome)
 ```
 
@@ -57,7 +58,12 @@ Three targets share one engine:
    k × stepover), and hole centres and diameters in Drill.swift. Without it, curves come out as thousands of tiny
    segments whose direction wobbles, and the machine brakes and accelerates at every one.
    `refine` caps each move at two cells and takes an `accept` check (keep-outs, boundary). Anything new that
-   produces finished walls should use it too, or parts come out a few tenths undersize.
+   produces finished walls should use it too, or parts come out a few tenths undersize. `minZ` clips triangles
+   at that height, so sloped and filleted walls give the true cross-section.
+   Pass limits with no exact geometry (silhouette holes, keep-outs, the side-B frame) are yes/no masks whose
+   contours are pure cell staircases. `straightenGridRuns` (Operations.swift) replaces those stretches, and the
+   inner pocket passes, with chords; on the wall pass it may reach 0.75 cells past the mask, which is always spare
+   margin. Measure motion smoothness on real output by counting turn-direction flips between consecutive G1 moves.
 6. `CAMContext.generate(op)` is the single entry point: it validates settings, dispatches by
    `OperationKind`, rejects non-finite moves, and appends warnings (feeds, flute length, test-cut, below
    stock). `JobTemplates.fullProcessing` (Templates.swift) picks operations from model traits.

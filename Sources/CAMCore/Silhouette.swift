@@ -13,19 +13,38 @@ struct Footprint: Sendable {
     private let cell: Double
     private let nx: Int, ny: Int
 
-    /// With `minZ`, only triangles reaching at least that height count: the footprint of the material at that level.
+    /// With `minZ`, only the parts of triangles at or above that height count: the footprint of the material standing
+    /// above that level. Triangles crossing `minZ` are clipped there; a sloped or filleted wall would otherwise count
+    /// as material all the way down to its foot, and the offset taken from it would be too far from the real wall.
     init(mesh: Mesh, minZ: Double = -.infinity, cell: Double = 4) {
         var t: [(V2, V2, V2)] = []
         t.reserveCapacity(mesh.triangles.count)
         var lo = V2(repeating: .infinity), hi = V2(repeating: -.infinity)
-        for tri in mesh.triangles {
-            if minZ > -.infinity, Double(max(tri.a.z, tri.b.z, tri.c.z)) < minZ { continue }
-            let a = V2(Double(tri.a.x), Double(tri.a.y)), b = V2(Double(tri.b.x), Double(tri.b.y))
-            let c = V2(Double(tri.c.x), Double(tri.c.y))
-            guard a.x.isFinite, a.y.isFinite, b.x.isFinite, b.y.isFinite, c.x.isFinite, c.y.isFinite else { continue }
+        func add(_ a: V2, _ b: V2, _ c: V2) {
+            guard a.x.isFinite, a.y.isFinite, b.x.isFinite, b.y.isFinite, c.x.isFinite, c.y.isFinite else { return }
             t.append((a, b, c))
             lo = simd_min(lo, simd_min(a, simd_min(b, c)))
             hi = simd_max(hi, simd_max(a, simd_max(b, c)))
+        }
+        for tri in mesh.triangles {
+            let v = [tri.a, tri.b, tri.c].map { V3(Double($0.x), Double($0.y), Double($0.z)) }
+            if minZ > -.infinity, v.allSatisfy({ $0.z < minZ }) { continue }
+            if minZ == -.infinity || v.allSatisfy({ $0.z >= minZ }) {
+                add(v[0].xy, v[1].xy, v[2].xy)
+                continue
+            }
+            // Clip the triangle to z >= minZ (Sutherland-Hodgman against one plane): 3 or 4 vertices.
+            var poly: [V2] = []
+            for i in 0..<3 {
+                let p = v[i], q = v[(i + 1) % 3]
+                if p.z >= minZ { poly.append(p.xy) }
+                if (p.z >= minZ) != (q.z >= minZ) {
+                    let s = (minZ - p.z) / (q.z - p.z)
+                    poly.append((p + (q - p) * s).xy)
+                }
+            }
+            if poly.count >= 3 { add(poly[0], poly[1], poly[2]) }
+            if poly.count == 4 { add(poly[0], poly[2], poly[3]) }
         }
         tris = t
         if t.isEmpty { lo = .zero; hi = .zero }
