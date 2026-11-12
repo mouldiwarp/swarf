@@ -103,7 +103,7 @@ struct SwarfCommands: Commands {
             Button("Draw Keep-out Region") { model?.mode = .drawKeepOut }.keyboardShortcut("k", modifiers: [.command, .option])
         }
         CommandMenu("Toolpath") {
-            Button("Generate Toolpaths") { model?.generateNow() }.keyboardShortcut("g", modifiers: .command)
+            Button("Recalculate All Toolpaths") { model?.generateNow() }.keyboardShortcut("g", modifiers: .command)
             Button("Full Processing Template") { model?.addFullProcessing() }.keyboardShortcut("f", modifiers: [.command, .shift])
             Menu("Add Operation") {
                 ForEach(OperationKind.allCases) { k in Button(k.displayName) { model?.addOperation(k) } }

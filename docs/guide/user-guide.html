@@ -173,6 +173,8 @@ open build/Swarf.app</pre>
   <p>An operation is one machining step with one tool. Click <b>Full Processing</b> in the sidebar to let Swarf look at the model and add what it needs:
     facing if the model sits below the stock top, roughing and finishing for curved tops, pockets for cavities, and a cutout with tabs.
     Or click <b>+</b> to add operations yourself. Operations run in list order. Drag them to reorder.</p>
+  <p>Swarf recalculates toolpaths automatically when you change a setting or replace the model. To force a fresh calculation of
+    every operation, click <b>Recalculate All Toolpaths</b> under the operation list, <b>Recalculate All</b> in the toolbar, or press ⌘G.</p>
   <table>
     <tr><th style="width:24%">Operation</th><th>Use it for</th></tr>
     <tr><td>Facing</td><td>Flattening the stock top. Set the depth and choose zig-zag or one-way passes.</td></tr>
@@ -308,7 +310,7 @@ open build/Swarf.app</pre>
   <table>
     <tr><th>Action</th><th>Shortcut</th><th>Action</th><th>Shortcut</th></tr>
     <tr><td>Import STL</td><td>⇧⌘I</td><td>Lay flat</td><td>⌥⌘L</td></tr>
-    <tr><td>Generate toolpaths</td><td>⌘G</td><td>Pick face to point up</td><td>⌥⌘U</td></tr>
+    <tr><td>Recalculate all toolpaths</td><td>⌘G</td><td>Pick face to point up</td><td>⌥⌘U</td></tr>
     <tr><td>Simulate</td><td>⌘R</td><td>Pick face to lay on bed</td><td>⌥⌘D</td></tr>
     <tr><td>Export G-code</td><td>⌘E</td><td>Rotate 90° about X / Y / Z</td><td>⌥⌘X / ⌥⌘Y / ⌥⌘Z</td></tr>
     <tr><td>Settings / tool library</td><td>⌘,</td><td>Draw keep-out</td><td>⌥⌘K</td></tr>

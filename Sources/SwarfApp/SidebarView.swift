@@ -75,6 +75,25 @@ struct SidebarView: View {
                 }
                 .onMove { model.moveOperations(from: $0, to: $1) }
                 .onDelete { idx in for i in idx { model.deleteOperation(model.job.operations[i].id) } }
+                if !model.job.operations.isEmpty {
+                    Button { model.generateNow() } label: {
+                        HStack(spacing: 6) {
+                            if model.generating {
+                                ProgressView().controlSize(.small)
+                                Text("Recalculating…")
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Recalculate All Toolpaths")
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .disabled(model.placed == nil)
+                    .help("Throw away every calculated toolpath and calculate them all again (⌘G)")
+                    .selectionDisabled()
+                    .padding(.vertical, 4)
+                }
                 if model.job.operations.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("No operations yet.").font(.caption).foregroundStyle(.secondary)

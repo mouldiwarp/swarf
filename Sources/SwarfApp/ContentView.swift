@@ -85,12 +85,14 @@ struct ContentView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             Button { model.generateNow() } label: {
                 if model.generating {
-                    ProgressView().controlSize(.small)
+                    Label { Text("Recalculating…") } icon: { ProgressView().controlSize(.small) }
                 } else {
-                    Label("Generate", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Recalculate All", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            .help("Recalculate all toolpaths from scratch (⌘G)")
+            .labelStyle(.titleAndIcon)
+            .disabled(model.placed == nil || model.job.operations.isEmpty)
+            .help("Recalculate every toolpath from scratch (⌘G)")
             Toggle(isOn: $model.simMode.animation()) {
                 Label("Simulate", systemImage: "play.square.stack")
             }

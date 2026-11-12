@@ -525,7 +525,7 @@ final class ProjectModel: ObservableObject {
             case .done where !contextStale && cache[op.id]?.key == opKey(op):
                 break
             default:
-                if !generating { out.append("\(op.name) has changed since it was calculated. Generate the toolpaths again before exporting.") }
+                if !generating { out.append("\(op.name) has changed since it was calculated. Click Recalculate All (⌘G) before exporting.") }
             }
         }
         if let t = job.activeTestCut {
