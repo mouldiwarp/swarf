@@ -46,6 +46,3 @@ Two-sided (flip) machining is in: dowel holes, side A, a roll about X, then side
 
 ## Website and docs
 
-- **gm-guitars.net/tools/swarf** may still say the default work zero is front-left. It is now centre-left,
-  top of stock (`WorkOrigin.swarfDefault`). It may also need to mention the Recalculate All button and the
-  export file name.
