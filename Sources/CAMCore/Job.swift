@@ -217,6 +217,8 @@ public struct Job: Codable, Sendable, Equatable {
     }
     /// The limits in force, or nil when test-cut mode is off.
     public var activeTestCut: TestCut? { testCut?.enabled == true ? testCut : nil }
+    /// G-code file name chosen in the Export dialog (no extension). Nil uses the model name.
+    public var exportName: String? = nil
 
     public init() {}
 }

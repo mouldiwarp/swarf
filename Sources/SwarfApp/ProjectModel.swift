@@ -86,7 +86,10 @@ final class ProjectModel: ObservableObject {
 
     init(document: SwarfDocument) {
         self.document = document
+        // The export file name doesn't affect toolpaths, so changing it alone skips regeneration.
         document.$job
+            .map { j -> Job in var k = j; k.exportName = nil; return k }
+            .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor in self?.jobChanged() }
@@ -553,9 +556,11 @@ final class ProjectModel: ObservableObject {
 
     func postProcessor(profile: MachineProfile? = nil) -> PostProcessor? {
         guard let placed else { return nil }
-        return PostProcessor(profile: profile ?? machine, origin: placed.originPoint(job.origin),
-                             safeZ: placed.stockTop + job.safeHeight, jobName: document.modelName, stockSize: placed.stockSize,
-                             testCut: job.activeTestCut)
+        var post = PostProcessor(profile: profile ?? machine, origin: placed.originPoint(job.origin),
+                                 safeZ: placed.stockTop + job.safeHeight, jobName: document.modelName, stockSize: placed.stockSize,
+                                 testCut: job.activeTestCut)
+        if let n = job.exportName, !n.trimmingCharacters(in: .whitespaces).isEmpty { post.fileName = n }
+        return post
     }
 
     // MARK: View

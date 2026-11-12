@@ -13,6 +13,7 @@ struct ExportView: View {
     @State private var exported: String?
     @State private var problem: String?
     @State private var blocking = false
+    @State private var fileName = ""
 
     var profile: MachineProfile { MachineProfile.find(machineID.isEmpty ? model.job.machineID : machineID) }
 
@@ -28,6 +29,14 @@ struct ExportView: View {
             }
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 10) {
+                    GroupBox("File name") {
+                        HStack {
+                            TextField("File name", text: $fileName, prompt: Text(model.document.modelName))
+                                .textFieldStyle(.roundedBorder)
+                            Text(".\(profile.fileExtension)").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     GroupBox("Files") {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(Array(files.enumerated()), id: \.offset) { i, f in
@@ -106,8 +115,10 @@ struct ExportView: View {
         .frame(minWidth: 980, minHeight: 620)
         .onAppear {
             machineID = model.job.machineID
+            fileName = model.job.exportName ?? model.document.modelName
             rebuild()
         }
+        .onChange(of: fileName) { _, _ in rebuild() }
         .onChange(of: machineID) { _, _ in rebuild() }
         .onChange(of: model.toolpathVersion) { _, _ in rebuild() }
         .onChange(of: model.generating) { _, _ in rebuild() }
@@ -120,15 +131,28 @@ struct ExportView: View {
         return lines.count > 400 ? head + "\n… (\(lines.count - 400) more lines)" : head
     }
 
+    /// The typed name, or nil for "use the model name".
+    var chosenName: String? {
+        let t = fileName.trimmingCharacters(in: .whitespaces)
+        return (t.isEmpty || t == model.document.modelName) ? nil : t
+    }
+
+    /// Remembers the chosen name in the project so the next export starts from it.
+    func saveFileName() {
+        let name = chosenName
+        if model.job.exportName != name { model.updateJob("Change Export Name") { $0.exportName = name } }
+    }
+
     func rebuild() {
         exported = nil
         problem = nil
         blocking = model.generating
-        guard let post = model.postProcessor(profile: profile) else {
+        guard var post = model.postProcessor(profile: profile) else {
             files = []
             warnings = ["There is no model to export."]
             return
         }
+        post.fileName = chosenName
         files = post.process(model.toolpaths)
         if !files.indices.contains(selectedFile) { selectedFile = 0 }
         var w = model.exportIssues
@@ -147,6 +171,7 @@ struct ExportView: View {
             guard panel.runModal() == .OK, let url = panel.url else { return }
             do {
                 try files[0].content.write(to: url, atomically: true, encoding: .utf8)
+                saveFileName()
                 exported = "Saved \(url.lastPathComponent)"
                 problem = nil
             } catch { problem = "Could not save \(url.lastPathComponent): \(error.localizedDescription)" }
@@ -173,6 +198,7 @@ struct ExportView: View {
                     try f.content.write(to: dir.appendingPathComponent(f.name), atomically: true, encoding: .utf8)
                     written += 1
                 }
+                saveFileName()
                 exported = "Saved \(files.count) files to \(dir.lastPathComponent)"
                 problem = nil
                 NSWorkspace.shared.activateFileViewerSelecting([dir.appendingPathComponent(files[0].name)])

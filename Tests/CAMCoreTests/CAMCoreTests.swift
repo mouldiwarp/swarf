@@ -636,7 +636,8 @@ import simd
         let g = files[0].content
         #expect(files[0].name == "Job.gcode")
         #expect(g.contains("G21"))
-        #expect(g.contains("M3 S18000"))
+        #expect(g.contains("M3 P0 S18000"))
+        #expect(g.contains("M5 P0"))
         #expect(g.contains("G4 S5"))
         #expect(!g.contains("M6"))
         #expect(g.contains("G3 ") || g.contains("G2 "))  // arc fitted
@@ -810,6 +811,42 @@ import simd
         let post = PostProcessor(profile: .grbl, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
         let g = post.process([tp])[0].content
         #expect(g.contains("G1 X30 F1500"), "\(g)")
+    }
+
+    @Test func rrfSpindleCommandsNameTheSpindle() {
+        // RRF 3.3+ rejects a bare M3 when no tool is selected: "M3: No P parameter and no active tool with spindle".
+        let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        let paths = [path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9)), path(tool: b, from: V3(5, 5, 15), to: V3(9, 9, 9))]
+        for profile in [MachineProfile.workbeeRRF, .duetGeneric] {
+            let post = PostProcessor(profile: profile, origin: .zero, safeZ: 15, jobName: "J", stockSize: V3(50, 50, 10))
+            for f in post.process(paths) {
+                let lines = f.content.split(separator: "\n")
+                let on = lines.filter { $0.hasPrefix("M3") }, off = lines.filter { $0.hasPrefix("M5") }
+                #expect(!on.isEmpty && !off.isEmpty)
+                for l in on + off { #expect(l.contains(" P0"), "\(profile.id): \(l)") }
+            }
+        }
+    }
+
+    @Test func exportFileNameCanBeChosen() {
+        let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
+        let one = [path(tool: a, from: V3(10, 10, 15), to: V3(20, 20, 9))]
+        let two = one + [path(tool: b, from: V3(5, 5, 15), to: V3(9, 9, 9))]
+        var post = PostProcessor(profile: .workbeeRRF, origin: .zero, safeZ: 15, jobName: "Model", stockSize: V3(50, 50, 10))
+        #expect(post.process(one)[0].name == "Model.gcode")
+        post.fileName = "Strat body v2.gcode"
+        #expect(post.process(one)[0].name == "Strat_body_v2.gcode")
+        #expect(post.process(two).allSatisfy { $0.name.hasPrefix("Strat_body_v2_") })
+        post.fileName = "../../etc/x"
+        #expect(!post.process(one)[0].name.contains("/"))
+        post.fileName = "   "
+        #expect(post.process(one)[0].name == "Model.gcode")
+        // Old projects have no export name and still open.
+        let data = try! JSONEncoder().encode(Job())
+        var obj = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        obj.removeValue(forKey: "exportName")
+        let old = try! JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: obj))
+        #expect(old.exportName == nil)
     }
 
     @Test func rrfToolChangePromptEscapesQuotes() {

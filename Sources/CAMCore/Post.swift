@@ -45,6 +45,9 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         spindleDwell: 5, dwellSyntax: .sSeconds,
         header: ["G90 ; absolute positioning", "G21 ; millimetres", "G17 ; XY plane for arcs"],
         footer: ["G0 Z{safeZ}", "G0 X0 Y0"],
+        // RRF 3.3+ rejects a bare M3 unless a tool with a spindle is selected ("M3: No P parameter and no active
+        // tool with spindle"), so name spindle 0 explicitly. That works with or without a selected tool.
+        spindleOn: "M3 P0 S{rpm}", spindleOff: "M5 P0",
         envelope: V3(750, 750, 120), maxFeed: 5000, rapidRate: 5000, acceleration: 500, minRPM: 0, maxRPM: 30000,
         notes: "One file per tool. Zero XY on the stock corner and probe Z before each file. Arcs enabled (G2/G3).")
 
@@ -53,6 +56,7 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         fileExtension: "gcode", commentStyle: .semicolon, toolChange: .rrfPrompt, splitFilesPerTool: false,
         spindleDwell: 3, dwellSyntax: .sSeconds,
         header: ["G90", "G21", "G17"], footer: ["G0 Z{safeZ}"],
+        spindleOn: "M3 P0 S{rpm}", spindleOff: "M5 P0",
         envelope: V3(1000, 1000, 150), maxFeed: 6000, rapidRate: 6000, acceleration: 500, minRPM: 0, maxRPM: 30000)
 
     public static let grbl = MachineProfile(
@@ -166,6 +170,8 @@ public struct PostProcessor: Sendable {
     public var stockSize: V3
     /// Set when the toolpaths were made in test-cut mode: marks the files so they are not run on good stock.
     public var testCut: TestCut?
+    /// Base name for the exported files, without extension. Defaults to `jobName`.
+    public var fileName: String?
 
     public init(profile: MachineProfile, origin: V3, safeZ: Double, jobName: String, stockSize: V3, testCut: TestCut? = nil) {
         self.profile = profile; self.origin = origin; self.safeZ = safeZ; self.jobName = jobName; self.stockSize = stockSize
@@ -194,6 +200,15 @@ public struct PostProcessor: Sendable {
             }
         }
         return out
+    }
+
+    /// Drops a trailing ".gcode" / ".nc" etc. that the user typed, so it isn't doubled.
+    static func stripExtension(_ s: String, _ ext: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        for e in Set([ext, "gcode", "nc", "ngc", "tap", "txt"]) where t.lowercased().hasSuffix("." + e.lowercased()) {
+            return String(t.dropLast(e.count + 1))
+        }
+        return t
     }
 
     /// A file-name component: letters, digits, "-", "_" and "." only, never empty and never a dot name.
@@ -256,7 +271,8 @@ public struct PostProcessor: Sendable {
             }
         }
         if groups.isEmpty { return [] }
-        let base = Self.fileSafe(jobName, fallback: "job") + (testCut != nil ? "_TEST" : "")
+        let chosen = fileName.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? jobName
+        let base = Self.fileSafe(Self.stripExtension(chosen, profile.fileExtension), fallback: "job") + (testCut != nil ? "_TEST" : "")
         if profile.splitFilesPerTool && groups.count > 1 {
             return groups.enumerated().map { i, g in
                 let t = g[0].tool
@@ -308,13 +324,13 @@ public struct PostProcessor: Sendable {
             if !firstGroup || part == nil {
                 switch profile.toolChange {
                 case .m6:
-                    out("M5")
+                    out(fill(profile.spindleOff))
                     out("T\(tool.number) M6")
                 case .pause:
-                    if !firstGroup { out("M5"); out(comment("Change tool to T\(tool.number): \(tool.name)")); out("M0") }
+                    if !firstGroup { out(fill(profile.spindleOff)); out(comment("Change tool to T\(tool.number): \(tool.name)")); out("M0") }
                 case .rrfPrompt:
                     if !firstGroup {
-                        out("M5")
+                        out(fill(profile.spindleOff))
                         out("G0 Z\(num(safeZ - origin.z))")
                         // RepRapFirmware reads "" inside a quoted string as one literal quote.
                         let shown = Self.ascii(tool.name).replacingOccurrences(of: "\"", with: "\"\"")
