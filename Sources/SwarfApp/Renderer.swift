@@ -120,6 +120,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var pathSegmentToVertex: [Int] = []
     private var overlayLineBuf: MTLBuffer?, overlayLineCount = 0  // rubber band, tool marker
     private var heightTex: MTLTexture?, devTex: MTLTexture?
+    /// Underside of the simulated stock after side-B cuts (nil for one-sided jobs).
+    private var bottomTex: MTLTexture?, bottomDevTex: MTLTexture?
     private var heightGrid = SIMD4<Float>(0, 0, 1, 0)
     private var heightSize = SIMD4<UInt32>(0, 0, 0, 0)
     var showModel = true, showStock = true, showPaths = true, showSim = false
@@ -338,19 +340,32 @@ final class Renderer: NSObject, MTKViewDelegate {
         overlayLineBuf = buffer(l); overlayLineCount = l.count
     }
 
-    func setSimulation(_ stock: Grid2D?, analysis: StockSimulator.Analysis?, stockTop: Double) {
-        guard let g = stock else { heightTex = nil; devTex = nil; return }
+    func setSimulation(_ stock: Grid2D?, bottom: Grid2D? = nil, analysis: StockSimulator.Analysis?, stockTop: Double) {
+        guard let g = stock else { heightTex = nil; devTex = nil; bottomTex = nil; bottomDevTex = nil; return }
         let W = g.width, H = g.height
-        if heightTex == nil || heightTex!.width != W || heightTex!.height != H {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: W, height: H, mipmapped: false)
-            d.usage = .shaderRead
-            heightTex = device.makeTexture(descriptor: d)
-            devTex = device.makeTexture(descriptor: d)
+        func texture(_ t: inout MTLTexture?) {
+            if t == nil || t!.width != W || t!.height != H {
+                let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: W, height: H, mipmapped: false)
+                d.usage = .shaderRead
+                t = device.makeTexture(descriptor: d)
+            }
         }
-        g.data.withUnsafeBytes { heightTex!.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: W * 4) }
-        var dev = analysis?.deviation ?? []
-        if dev.count != W * H { dev = [Float](repeating: .nan, count: W * H) }
-        dev.withUnsafeBytes { devTex!.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: W * 4) }
+        func upload(_ data: [Float], _ t: MTLTexture) {
+            var v = data
+            if v.count != W * H { v = [Float](repeating: .nan, count: W * H) }
+            v.withUnsafeBytes { t.replace(region: MTLRegionMake2D(0, 0, W, H), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: W * 4) }
+        }
+        texture(&heightTex); texture(&devTex)
+        upload(g.data, heightTex!)
+        upload(analysis?.deviation ?? [], devTex!)
+        if let b = bottom, b.width == W, b.height == H {
+            texture(&bottomTex); texture(&bottomDevTex)
+            // Where the stock is cut right through, keep the underside from showing above the top.
+            upload(zip(b.data, g.data).map { min($0, $1 - 0.02) }, bottomTex!)
+            upload(analysis?.undersideDeviation ?? [], bottomDevTex!)
+        } else {
+            bottomTex = nil; bottomDevTex = nil
+        }
         heightGrid = SIMD4(Float(g.origin.x), Float(g.origin.y), Float(g.res), Float(stockTop))
         heightSize = SIMD4(UInt32(W), UInt32(H), analysis == nil ? 0 : 1, 0)
     }
@@ -379,7 +394,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         guard let rpd = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let cb = queue.makeCommandBuffer(), let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
         let eye = camera.eye
-        let light = simd_normalize(SIMD3<Float>(0.3, -0.5, 1) + simd_normalize(eye - camera.target) * 0.6)
+        // Light from the viewer's side of the stock, so the underside is lit when looking up at it (side B).
+        let below: Float = eye.z < camera.target.z ? -1 : 1
+        let light = simd_normalize(SIMD3<Float>(0.3, -0.5 * below, below) + simd_normalize(eye - camera.target) * 0.6)
         var u = Uniforms(viewProj: camera.projection(aspect: aspect) * camera.view(), lightDir: SIMD4(light, 0),
                          eye: SIMD4(eye, dark ? 1 : 0), grid: heightGrid, gridSize: heightSize, shade: shade)
         // Background gradient
@@ -398,6 +415,11 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setVertexTexture(devTex, index: 1)
             // Six vertices per grid cell; the vertex shader picks each cell's triangulation.
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6 * (ht.width - 1) * (ht.height - 1))
+            if let bt = bottomTex, bt.width == ht.width, bt.height == ht.height {
+                enc.setVertexTexture(bt, index: 0)
+                enc.setVertexTexture(bottomDevTex, index: 1)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6 * (bt.width - 1) * (bt.height - 1))
+            }
         } else if showModel, let mb = modelBuf {
             enc.setRenderPipelineState(meshPipe)
             enc.setVertexBuffer(mb, offset: 0, index: 0)
@@ -464,7 +486,7 @@ enum Shaders {
         if (dot(n, v) < 0) n = -n;
         float3 l = normalize(u.lightDir.xyz);
         float diff = max(dot(n, l), 0.0);
-        float hemi = 0.5 + 0.5 * n.z;
+        float hemi = 0.5 + 0.5 * n.z * (l.z >= 0 ? 1.0 : -1.0);
         float3 h = normalize(l + v);
         float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.25;
         float3 base = in.color.rgb;

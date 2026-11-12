@@ -30,6 +30,8 @@ public struct Toolpath: Sendable, Identifiable {
     public var warnings: [String] = []
     /// Engraving operations (V-carve): cells (1 = inside) where cutting below the model surface is intentional.
     public var engraveMask: Grid2D? = nil
+    /// The face this toolpath machines. Side-B moves are in side-B stock space (the machine's view after the flip).
+    public var side: MachiningSide = .a
 
     public init(id: UUID, name: String, kind: OperationKind, tool: Tool, rpm: Double, start: V3, moves: [Move]) {
         self.id = id; self.name = name; self.kind = kind; self.tool = tool; self.rpm = rpm; self.start = start; self.moves = moves

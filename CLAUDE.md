@@ -59,9 +59,15 @@ Three targets share one engine:
 6. `CAMContext.generate(op)` is the single entry point: it validates settings, dispatches by
    `OperationKind`, rejects non-finite moves, and appends warnings (feeds, flute length, test-cut, below
    stock). `JobTemplates.fullProcessing` (Templates.swift) picks operations from model traits.
-7. `StockSimulator` (Simulation.swift) removes material from a stock height field and compares it with the
+7. Two-sided jobs (Flip.swift): `Job.flip` turns them on and `Operation.side` (Optional) puts an operation on side B.
+   Side B uses its own `CAMContext` (`makeSideB`/`sideB`), built from `PlacedModel.rolledAboutX()`: (x, y, z) →
+   (x, W − y, T − z), so side-B toolpaths are in the machine's coordinates after the flip. `FrameProtection` keeps
+   side B off the stock frame and side A's tabs. Side-A cutout settings therefore feed side B's cache key
+   (`ProjectModel.cutoutsKey`). `.dowelHoles` drills on the Y centre line. `Toolpath.rolledAboutX` maps side B back
+   for display and simulation, and `PostProcessor.process` writes one file set per `FlipStage`.
+8. `StockSimulator` (Simulation.swift) removes material from a stock height field and compares it with the
    model (gouges / leftover). It also checks keep-out violations.
-8. `PostProcessor` (Post.swift) writes the files. Machine dialects are data: a `MachineProfile` in
+9. `PostProcessor` (Post.swift) writes the files. Machine dialects are data: a `MachineProfile` in
    `MachineProfile.builtIn`. The WorkBee profile splits output into one file per tool. `ArcFitter` turns
    linear moves into G2/G3. Names and comments are sanitised to ASCII so they can't inject G-code, and
    file names stay inside the chosen folder.

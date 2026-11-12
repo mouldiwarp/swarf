@@ -39,6 +39,9 @@ post-processors for most popular hobby machines.
 - **Build the toolpaths.** One click on *Full Processing* analyses the model and adds the operations
   it needs, or you can add them one at a time: facing, pockets, 3D roughing and finishing, V-carving,
   peck drilling and cutouts with holding tabs.
+- **Machine both sides** of a part, such as a guitar body with a carved top and control cavities in the
+  back. Swarf drills dowel holes through the stock into the spoilboard, machines and cuts out side A,
+  then machines side B after you roll the stock over onto dowels. Each step is exported as its own file.
 - **Protect features** with keep-out boxes you drag over the model. Click a box to select it, then
   drag it, nudge it with the arrow keys, or delete it with ⌫.
 - **Simulate** material removal, with a gouge check, a leftover-stock heat map, keep-out checks and a
@@ -103,6 +106,11 @@ The [user guide](docs/Swarf-User-Guide.pdf) covers each step in detail.
 | V-Carve | Engraves text and logos with a V-bit. Corners stay sharp and the depth follows the stroke width. Optional flat-bottom depth limit |
 | Drill (Peck) | Finds round holes that match the tool diameter and pecks them, with a full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Output is plain G0/G1, so it runs on any firmware |
 | Cutout (Profile) | Cuts the part free, internal holes first, with **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes off the last skin at a deeper cut (4× the roughing stepdown by default) for a clean edge |
+| Dowel Holes (Flip) | Two-sided jobs: two holes on the stock's centre line beyond each end of the part, through the stock and 5 mm into the spoilboard, for registration dowels |
+
+In a two-sided job, pockets, 3D roughing and finishing, and drilling can also be set to machine **side B**
+(the back). Side B is never cut out, faced or engraved: the part is cut out from side A, and side B
+leaves the stock frame and the tabs alone.
 
 Every operation has its own tool, spindle speed, feed, plunge rate, stepdown and stepover. You can
 also set climb or conventional cutting, stock to leave, and which keep-out regions apply.
@@ -156,7 +164,9 @@ swift build -c release
 Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--lay-flat`,
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
 `--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`,
-`--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`).
+`--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`), `--margin <mm>`,
+`--flip [spoilboard mm]` (two-sided job; with `--ops`, prefix side-B operations with `b:`, e.g.
+`--ops dowelHoles,pocket,cutout,b:pocket`).
 
 ## How it works
 
@@ -180,7 +190,7 @@ running unattended, and wear eye and hearing protection.
 ## Contributing
 
 Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Planned work
-includes rest machining, two-sided setups with dowel registration, a separate clearing tool for
+includes rest machining, a separate clearing tool for
 V-carving, editable post-processors and a G-code panel linked to the 3D view.
 
 ## License

@@ -28,10 +28,26 @@ public final class CAMContext: @unchecked Sendable {
     /// Distance (mm) from each cell to the model silhouette (0 inside).
     public let silhouetteDistance: Grid2D
     public let flatLevels: [Double]
+    /// Which face this context machines. Side B's `placed` is side A's rolled about X.
+    public let side: MachiningSide
+    /// Side B only: the stock frame and tabs that must not be cut.
+    let protection: FrameProtection?
 
     private var fieldCache: [String: Grid2D] = [:]
     private var footprintCache: Footprint?
     private let lock = NSLock()
+    private var sideBCache: CAMContext?
+
+    /// The side-B context for this job (built on first use), protecting the job's own side-A cutouts.
+    public var sideB: CAMContext {
+        if side == .b { return self }
+        lock.lock()
+        if let b = sideBCache { lock.unlock(); return b }
+        lock.unlock()
+        let b = makeSideB()
+        lock.lock(); sideBCache = b; lock.unlock()
+        return b
+    }
 
     /// Exact model footprint for sub-cell accurate outlines (built on first use).
     var footprint: Footprint {
@@ -48,9 +64,15 @@ public final class CAMContext: @unchecked Sendable {
     /// Work zero in stock space (XY). Toolpaths start here, matching where the G-code starts on the machine.
     public var startXY: V2 { let o = placed.originPoint(job.origin); return V2(o.x, o.y) }
 
-    public init(raw: Mesh, job: Job) {
+    public convenience init(raw: Mesh, job: Job) {
+        self.init(placed: PlacedModel(raw: raw, orientation: job.orientation, stock: job.stock), job: job, side: .a, protection: nil)
+    }
+
+    init(placed: PlacedModel, job: Job, side: MachiningSide, protection: FrameProtection?) {
         self.job = job
-        placed = PlacedModel(raw: raw, orientation: job.orientation, stock: job.stock)
+        self.placed = placed
+        self.side = side
+        self.protection = protection
         let s = placed.stockSize
         let maxTool = job.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }
             .filter(\.isFinite).max() ?? 5
@@ -103,7 +125,7 @@ public final class CAMContext: @unchecked Sendable {
             let mb = placed.modelBounds.min.z
             base = op.kind == .pocket ? max(0, mb) : (mb <= 0.01 ? min(op.bottomSkin, stockTop) : mb)
         }
-        if op.kind != .cutout, op.kind != .drill, let t = depthFloor(op) { return max(base, t) }
+        if op.kind != .cutout, op.kind != .drill, op.kind != .dowelHoles, let t = depthFloor(op) { return max(base, t) }
         return base
     }
 
@@ -129,6 +151,8 @@ public final class CAMContext: @unchecked Sendable {
         let keepOuts = rs.filter { $0.kind == .keepOut }
         let margin = Float(op.boundaryMargin + R)
         let res = g.res
+        let frame = protection
+        let top = Float(stockTop)
         for y in 0..<g.height {
             for x in 0..<g.width {
                 let i = y * g.width + x
@@ -148,6 +172,8 @@ public final class CAMContext: @unchecked Sendable {
                 for r in keepOuts where r.contains(p, inflate: res) {
                     v = max(v, r.protectBelowZ.map { Float($0) } ?? Grid2D.forbid)
                 }
+                // Side B: the frame and the tabs holding the part stay whole.
+                if let frame, frame.protects(p, silhouetteDistance: sil.data[i]) { v = max(v, top) }
                 g.data[i] = v
             }
         }
@@ -210,7 +236,7 @@ public final class CAMContext: @unchecked Sendable {
         guard c.rpm.isFinite, c.rpm >= 0 else { throw bad("the spindle speed is not valid.") }
         guard c.stepdown.isFinite, c.stepdown > 0 else { throw bad("the stepdown must be greater than zero.") }
         guard c.rampAngle.isFinite else { throw bad("the ramp angle is not valid.") }
-        let usesStepover = op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill
+        let usesStepover = op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill && op.kind != .dowelHoles
         if usesStepover {
             guard c.stepoverPercent.isFinite, c.stepoverPercent > 0, op.stepover >= 0.02 else {
                 throw bad("the stepover is too small (it must be at least 0.02 mm).")
@@ -227,6 +253,18 @@ public final class CAMContext: @unchecked Sendable {
     }
 
     public func generate(_ op: Operation, progress: ProgressHandler? = nil) throws -> Toolpath {
+        if op.kind != .dowelHoles && op.machiningSide != side {
+            guard op.machiningSide == .b, job.activeFlip != nil else {
+                throw CAMError.invalidSettings("\(op.name) is set to machine side B, but two-sided machining is off. Turn it on under Stock & Work Zero, or move the operation to side A.")
+            }
+            return try sideB.generate(op, progress: progress)
+        }
+        if op.kind == .dowelHoles && job.activeFlip == nil {
+            throw CAMError.invalidSettings("\(op.name): dowel holes are for two-sided machining. Turn it on under Stock & Work Zero.")
+        }
+        if side == .b && !op.kind.allowedOnSideB {
+            throw CAMError.invalidSettings("\(op.name): \(op.kind.displayName) can't be used on side B. The part is cut out from side A.")
+        }
         try validate(op)
         let start = V3(startXY.x, startXY.y, safeZ)
         var tp: Toolpath
@@ -238,8 +276,12 @@ public final class CAMContext: @unchecked Sendable {
         case .vcarve: tp = try vcarve(op, progress: progress)
         case .drill: tp = try drill(op, progress: progress)
         case .cutout: tp = try cutout(op, progress: progress)
+        case .dowelHoles:
+            if side == .b { return try CAMContext(placed: placed.rolledAboutX(), job: job, side: .a, protection: nil).generate(op, progress: progress) }
+            tp = try dowelHoles(op, progress: progress)
         }
         tp.start = start
+        tp.side = side
         // Last line of defence: a NaN or infinite coordinate must never reach a G-code file.
         for m in tp.moves {
             let ok = m.to.x.isFinite && m.to.y.isFinite && m.to.z.isFinite && m.feed.isFinite
@@ -259,11 +301,11 @@ public final class CAMContext: @unchecked Sendable {
             }
         }
         let deepest = tp.moves.map(\.to.z).min() ?? stockTop
-        if op.kind != .cutout && op.kind != .drill && deepest < -0.01 {
+        if op.kind != .cutout && op.kind != .drill && op.kind != .dowelHoles && deepest < -0.01 {
             tp.warnings.append(String(format: "Cuts %.2f mm below the stock bottom%@.", -deepest,
                                       op.kind == .vcarve ? " — set a depth limit or use a wider-angle V-bit" : ""))
         }
-        if stockTop - deepest > op.tool.fluteLength + 0.01 {
+        if op.kind != .dowelHoles && stockTop - deepest > op.tool.fluteLength + 0.01 {
             tp.warnings.append(String(format: "Cut depth %.1f mm exceeds the tool's flute length (%.1f mm).", stockTop - deepest, op.tool.fluteLength))
         }
         progress?(1)

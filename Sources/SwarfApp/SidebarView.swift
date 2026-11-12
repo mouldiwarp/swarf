@@ -62,19 +62,25 @@ struct SidebarView: View {
                 }
             }
 
-            Section {
-                ForEach(model.job.operations) { op in
-                    OperationRow(model: model, op: op)
-                        .tag(SidebarItem.operation(op.id))
-                        .contextMenu {
-                            Button("Duplicate") { model.duplicateOperation(op.id) }
-                            Button(op.enabled ? "Disable" : "Enable") { model.opBinding(op.id, \.enabled)?.wrappedValue.toggle() }
-                            Divider()
-                            Button("Delete", role: .destructive) { model.deleteOperation(op.id) }
+            if model.job.activeFlip != nil {
+                // Two-sided job: one list per step, in the order they run.
+                ForEach(FlipStage.allCases, id: \.self) { stage in
+                    let ops = model.job.operations.filter { $0.flipStage == stage }
+                    Section {
+                        operationRows(ops, stage: stage)
+                        if ops.isEmpty {
+                            Text(stage == .dowels ? "Add dowel holes from the + menu." : stage == .sideB
+                                 ? "Set an operation's side to B in its inspector, or right-click it." : "No operations yet.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
+                    } header: {
+                        Text(stage == .sideB ? "Side B (back) — after the flip" : stage.title)
+                    }
                 }
-                .onMove { model.moveOperations(from: $0, to: $1) }
-                .onDelete { idx in for i in idx { model.deleteOperation(model.job.operations[i].id) } }
+            }
+
+            Section {
+                if model.job.activeFlip == nil { operationRows(model.job.operations, stage: nil) }
                 if !model.job.operations.isEmpty {
                     Button { model.generateNow() } label: {
                         HStack(spacing: 6) {
@@ -105,7 +111,7 @@ struct SidebarView: View {
                 }
             } header: {
                 HStack {
-                    Text("Operations")
+                    Text(model.job.activeFlip == nil ? "Operations" : "Add operations")
                     Spacer()
                     Menu {
                         Button { model.addFullProcessing() } label: { Label("Full Processing (auto)", systemImage: "wand.and.stars") }
@@ -129,6 +135,32 @@ struct SidebarView: View {
             default: break
             }
         }
+    }
+}
+
+extension SidebarView {
+    @ViewBuilder func operationRows(_ ops: [CAMCore.Operation], stage: FlipStage?) -> some View {
+        ForEach(ops) { op in
+            OperationRow(model: model, op: op)
+                .tag(SidebarItem.operation(op.id))
+                .contextMenu {
+                    Button("Duplicate") { model.duplicateOperation(op.id) }
+                    Button(op.enabled ? "Disable" : "Enable") { model.opBinding(op.id, \.enabled)?.wrappedValue.toggle() }
+                    if model.job.activeFlip != nil && op.kind != .dowelHoles {
+                        if op.machiningSide == .b {
+                            Button("Move to Side A") { model.setSide(.a, for: op.id) }
+                        } else if op.kind.allowedOnSideB {
+                            Button("Move to Side B") { model.setSide(.b, for: op.id) }
+                        }
+                    }
+                    Divider()
+                    Button("Delete", role: .destructive) { model.deleteOperation(op.id) }
+                }
+        }
+        .onMove { from, to in
+            if let stage { model.moveOperations(in: stage, from: from, to: to) } else { model.moveOperations(from: from, to: to) }
+        }
+        .onDelete { idx in for i in idx { model.deleteOperation(ops[i].id) } }
     }
 }
 

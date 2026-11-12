@@ -120,6 +120,7 @@ struct SwarfCommands: Commands {
             Button("Top View") { model?.requestView(.top) }.keyboardShortcut("1", modifiers: .command)
             Button("Front View") { model?.requestView(.front) }.keyboardShortcut("2", modifiers: .command)
             Button("Right View") { model?.requestView(.right) }.keyboardShortcut("3", modifiers: .command)
+            Button("Bottom View") { model?.requestView(.bottom) }.keyboardShortcut("4", modifiers: .command)
             Divider()
         }
         CommandGroup(after: .windowArrangement) {

@@ -475,7 +475,12 @@ extension CAMContext {
         let fp = footprint
         let edge = g.res * 2
         let maxX = g.origin.x + Double(g.width - 1) * g.res, maxY = g.origin.y + Double(g.height - 1) * g.res
-        return loops.compactMap { l -> Loop? in
+        return loops.compactMap { l0 -> Loop? in
+            // The contour tracer can start a loop anywhere, and automatic tabs are spaced from the start. Begin at
+            // the front-left-most point so the tabs stay put every time the toolpath is recalculated (and side B
+            // can find them).
+            guard let first = l0.points.min(by: { ($0.y, $0.x) < ($1.y, $1.x) }) else { return nil }
+            let l = l0.starting(near: first)
             let bb = l.bounds
             if bb.min.x < g.origin.x + edge || bb.min.y < g.origin.y + edge || bb.max.x > maxX - edge || bb.max.y > maxY - edge { return nil }
             if l.perimeter < op.tool.diameter { return nil }

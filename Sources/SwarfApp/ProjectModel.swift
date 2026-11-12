@@ -45,7 +45,16 @@ final class ProjectModel: ObservableObject {
     @Published var mode: InteractionMode = .orbit
     @Published private(set) var placed: PlacedModel?
     @Published private(set) var meshVersion = 0
-    @Published private(set) var toolpaths: [Toolpath] = []
+    /// Toolpaths as exported: side-B moves are in the machine's coordinates after the flip.
+    @Published private(set) var toolpaths: [Toolpath] = [] {
+        didSet {
+            // For drawing and simulating, side B is shown from below the side-A view of the part.
+            let s = placed?.stockSize ?? .zero
+            displayToolpaths = toolpaths.map { $0.side == .b ? $0.rolledAboutX(stockSize: s) : $0 }
+        }
+    }
+    /// `toolpaths` in side-A coordinates, for the 3D view and the simulation.
+    @Published private(set) var displayToolpaths: [Toolpath] = []
     @Published private(set) var toolpathVersion = 0
     @Published private(set) var status: [UUID: OpStatus] = [:]
     @Published private(set) var generating = false
@@ -76,6 +85,8 @@ final class ProjectModel: ObservableObject {
     // Simulation
     @Published var simMode = false
     @Published private(set) var simStock: Grid2D?
+    /// Underside of the simulated stock once side B has cut (side-A coordinates).
+    @Published private(set) var simBottom: Grid2D?
     @Published private(set) var simVersion = 0
     @Published private(set) var simAnalysis: StockSimulator.Analysis?
     @Published var simPosition: Double = 1  // 0...1
@@ -86,6 +97,9 @@ final class ProjectModel: ObservableObject {
 
     private var context: CAMContext?
     private var contextKey = ""
+    /// Side-B context: depends on the side-A context and on the side-A cutouts (slot and tabs to protect).
+    private var contextB: CAMContext?
+    private var contextBKey = ""
     private var cache: [UUID: (key: String, tp: Toolpath)] = [:]
     private var task: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
@@ -145,7 +159,8 @@ final class ProjectModel: ObservableObject {
 
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES, -SwarfAutoExport YES,
     /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
-    /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box).
+    /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box),
+    /// -SwarfMargin mm (stock XY margin), -SwarfFlip YES (two-sided job).
     private func runAutomationHooks() {
         let d = UserDefaults.standard
         if document.mesh != nil, let v = d.string(forKey: "SwarfView"), let preset = ViewPreset(rawValue: v) {
@@ -156,6 +171,8 @@ final class ProjectModel: ObservableObject {
             if n.count == 4 { addRegion(min: V2(n[0], n[1]), max: V2(n[2], n[3])) }
         }
         guard d.bool(forKey: "SwarfAutoProcess"), document.mesh != nil, document.job.operations.isEmpty else { return }
+        if d.object(forKey: "SwarfMargin") != nil { updateJob("Stock Margin") { $0.stock.marginXY = d.double(forKey: "SwarfMargin") } }
+        if d.bool(forKey: "SwarfFlip") { setFlip(true) }
         if d.bool(forKey: "SwarfAutoSimulate") { pendingAutoSim = true }
         if d.bool(forKey: "SwarfAutoExport") { pendingAutoExport = true }
         if let list = d.string(forKey: "SwarfAutoOps") {
@@ -304,7 +321,8 @@ final class ProjectModel: ObservableObject {
         default: tool = pick(.flat)
         }
         let op = CAMCore.Operation(kind: kind, tool: tool, material: .named(job.stock.materialID))
-        updateJob("Add Operation") { $0.operations.append(op) }
+        // Dowel holes are always drilled first, while the stock is still where side A will be machined.
+        updateJob("Add Operation") { j in if kind == .dowelHoles { j.operations.insert(op, at: 0) } else { j.operations.append(op) } }
         selection = .operation(op.id)
         announceScaling(tool)
     }
@@ -314,8 +332,12 @@ final class ProjectModel: ObservableObject {
         let job = self.job
         let lib = ToolLibraryStore.shared.library
         let ctx = CAMContext(raw: mesh, job: job)
-        let ops = JobTemplates.fullProcessing(ctx, library: lib, material: .named(job.stock.materialID))
-        updateJob("Full Processing") { $0.operations.append(contentsOf: ops) }
+        var ops = JobTemplates.fullProcessing(ctx, library: lib, material: .named(job.stock.materialID))
+        if job.operations.contains(where: { $0.kind == .dowelHoles }) { ops.removeAll { $0.kind == .dowelHoles } }
+        updateJob("Full Processing") { j in
+            j.operations.append(contentsOf: ops)
+            if j.activeFlip != nil { Self.sortByStage(&j.operations) }
+        }
         if let f = ops.first { selection = .operation(f.id) }
         let m = Material.named(job.stock.materialID)
         if let adj = m.adjustmentSummary, !ops.isEmpty {
@@ -340,6 +362,52 @@ final class ProjectModel: ObservableObject {
 
     func moveOperations(from: IndexSet, to: Int) {
         updateJob("Reorder Operations") { $0.operations.move(fromOffsets: from, toOffset: to) }
+    }
+
+    /// Reorders operations within one step of a two-sided job (the sidebar shows each step as its own list).
+    func moveOperations(in stage: FlipStage, from: IndexSet, to: Int) {
+        updateJob("Reorder Operations") { j in
+            var group = j.operations.filter { $0.flipStage == stage }
+            group.move(fromOffsets: from, toOffset: to)
+            let rest = j.operations.filter { $0.flipStage != stage }
+            j.operations = rest + group
+            Self.sortByStage(&j.operations)
+        }
+    }
+
+    /// Dowel holes, then side A, then side B, keeping the order within each.
+    static func sortByStage(_ ops: inout [CAMCore.Operation]) {
+        ops = FlipStage.allCases.flatMap { s in ops.filter { $0.flipStage == s } }
+    }
+
+    /// Turns two-sided machining on or off. Turning it on adds the dowel-hole step if there isn't one.
+    func setFlip(_ on: Bool) {
+        let lib = ToolLibraryStore.shared.library
+        let tool = lib.closest(kind: .flat, diameter: 6) ?? ToolLibrary.starter.tools[0]
+        let material = CAMCore.Material.named(job.stock.materialID)
+        updateJob(on ? "Machine Both Sides" : "Machine One Side") { j in
+            j.flipSettings.enabled = on
+            if on && !j.operations.contains(where: { $0.kind == .dowelHoles }) {
+                var d = CAMCore.Operation(kind: .dowelHoles, tool: tool, material: material)
+                d.name = "Dowel holes"
+                j.operations.insert(d, at: 0)
+            }
+            if on { Self.sortByStage(&j.operations) }
+        }
+        if on, let ctx = context, ctx.job.stock == job.stock {
+            if let d = job.operations.first(where: { $0.kind == .dowelHoles }), (try? ctx.dowelPositions(toolDiameter: d.tool.diameter)) == nil {
+                showNotice("The stock has no room for dowel holes beyond the ends of the part. Increase the XY margin or the stock length.")
+            }
+        }
+    }
+
+    /// Changes which face an operation machines, keeping the list in step order.
+    func setSide(_ side: MachiningSide, for id: UUID) {
+        updateJob("Change Side") { j in
+            guard let i = j.operations.firstIndex(where: { $0.id == id }) else { return }
+            j.operations[i].machiningSide = side
+            Self.sortByStage(&j.operations)
+        }
     }
 
     func showNotice(_ text: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
@@ -476,7 +544,7 @@ final class ProjectModel: ObservableObject {
         enc.outputFormatting = .sortedKeys
         let maxTool = j.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }.max() ?? 5
         let parts: [Data] = [(try? enc.encode(j.orientation)) ?? Data(), (try? enc.encode(j.stock)) ?? Data(),
-                             (try? enc.encode(j.origin)) ?? Data(), (try? enc.encode(j.regions)) ?? Data(), (try? enc.encode(j.activeTestCut)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8),
+                             (try? enc.encode(j.origin)) ?? Data(), (try? enc.encode(j.regions)) ?? Data(), (try? enc.encode(j.activeTestCut)) ?? Data(), (try? enc.encode(j.activeFlip)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8),
                              // The model itself: replacing it (or undoing a replacement) changes the revision, so every
                              // operation's cache key changes and nothing computed for the old shape survives.
                              Data("model\(document.modelRevision)".utf8)]
@@ -488,7 +556,19 @@ final class ProjectModel: ObservableObject {
         enc.outputFormatting = .sortedKeys
         var o = op
         o.name = ""
-        return String(decoding: (try? enc.encode(o)) ?? Data(), as: UTF8.self) + contextKey
+        let own = String(decoding: (try? enc.encode(o)) ?? Data(), as: UTF8.self) + contextKey
+        return op.machiningSide == .b && op.kind != .dowelHoles ? own + "#B" + Self.cutoutsKey(job) : own
+    }
+
+    /// Side-A cutouts, which decide what side B must leave (the frame and tabs).
+    static func cutoutsKey(_ j: Job) -> String {
+        let enc = JSONEncoder()
+        enc.outputFormatting = .sortedKeys
+        // Only what decides the slot and the tabs: feeds and names don't matter to side B.
+        return j.operations.filter { $0.enabled && $0.kind == .cutout && $0.machiningSide == .a }.map { c in
+            [(try? enc.encode(c.tool)) ?? Data(), (try? enc.encode(c.tabs)) ?? Data(), (try? enc.encode(c.cutoutFinish)) ?? Data(),
+             Data("\(c.stockToLeaveXY)|\(c.cutHoles)|\(c.direction)".utf8)].map { String(decoding: $0, as: UTF8.self) }.joined(separator: "|")
+        }.joined(separator: "#")
     }
 
     /// Recalculates every toolpath from scratch: discards cached toolpaths and the prepared model geometry.
@@ -496,6 +576,8 @@ final class ProjectModel: ObservableObject {
         cache = [:]
         context = nil
         contextKey = ""
+        contextB = nil
+        contextBKey = ""
         for op in job.operations where op.enabled { status[op.id] = .pending }
         scheduleGeneration(delay: 0)
     }
@@ -526,8 +608,18 @@ final class ProjectModel: ObservableObject {
             if Task.isCancelled { return }
             context = ctx
             contextKey = key
+            contextB = nil
         }
         guard let ctx = context else { return }
+        if j.activeFlip != nil, j.operations.contains(where: { $0.enabled && $0.machiningSide == .b && $0.kind != .dowelHoles }) {
+            let bKey = key + "#" + Self.cutoutsKey(j)
+            if contextB == nil || bKey != contextBKey {
+                let cuts = j.operations
+                contextB = await Task.detached(priority: .userInitiated) { ctx.makeSideB(cutouts: cuts) }.value
+                if Task.isCancelled { return }
+                contextBKey = bKey
+            }
+        }
         var out: [Toolpath] = []
         var newStatus = status
         for op in j.operations {
@@ -543,7 +635,8 @@ final class ProjectModel: ObservableObject {
             status[op.id] = .running(0)
             let id = op.id
             do {
-                let tp = try await Self.generate(ctx: ctx, op: op) { [weak self] p in
+                let useB = op.machiningSide == .b && op.kind != .dowelHoles && j.activeFlip != nil
+                let tp = try await Self.generate(ctx: useB ? (contextB ?? ctx) : ctx, op: op) { [weak self] p in
                     Task { @MainActor [weak self] in
                         if case .running = self?.status[id] { self?.status[id] = .running(p) }
                     }
@@ -566,6 +659,7 @@ final class ProjectModel: ObservableObject {
         let ids = Set(j.operations.map(\.id))
         cache = cache.filter { ids.contains($0.key) }
         status = newStatus.filter { ids.contains($0.key) }
+        if j.activeFlip != nil { out = FlipStage.allCases.flatMap { s in out.filter { $0.flipStage == s } } }
         toolpaths = out
         toolpathVersion += 1
         if simMode || pendingAutoSim { pendingAutoSim = false; startSimulation() }
@@ -643,7 +737,7 @@ final class ProjectModel: ObservableObject {
     func startSimulation() {
         guard let placed, !toolpaths.isEmpty else { return }
         simMode = true
-        let runner = SimRunner(toolpaths: toolpaths, placed: placed)
+        let runner = SimRunner(toolpaths: displayToolpaths, placed: placed)
         simRunner = runner
         simAnalysis = nil
         simPosition = 1
@@ -656,6 +750,7 @@ final class ProjectModel: ObservableObject {
         simMode = false
         simRunner = nil
         simStock = nil
+        simBottom = nil
         simAnalysis = nil
         simToolPosition = nil
         simVersion += 1
@@ -664,9 +759,10 @@ final class ProjectModel: ObservableObject {
     func seekSimulation(to fraction: Double, analyze: Bool = false) {
         guard let runner = simRunner else { return }
         let target = Int((Double(runner.segmentCount) * max(0, min(1, fraction))).rounded())
-        runner.seek(to: target, analyze: analyze || target >= runner.segmentCount) { [weak self] stock, analysis, toolPos in
+        runner.seek(to: target, analyze: analyze || target >= runner.segmentCount) { [weak self] stock, bottom, analysis, toolPos in
             guard let self, self.simRunner === runner else { return }
             self.simStock = stock
+            self.simBottom = bottom
             if let a = analysis { self.simAnalysis = a }
             self.simToolPosition = toolPos
             self.simVersion += 1
@@ -696,7 +792,7 @@ final class ProjectModel: ObservableObject {
 }
 
 enum ViewPreset: String, CaseIterable, Identifiable {
-    case iso, top, front, right
+    case iso, top, front, right, bottom
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
 }
@@ -711,7 +807,7 @@ extension Region {
 
 /// Runs the stock simulation off the main thread, coalescing seek requests.
 final class SimRunner: @unchecked Sendable {
-    struct Segment { var a: V3; var b: V3; var tool: Tool; var cutting: Bool }
+    struct Segment { var a: V3; var b: V3; var tool: Tool; var cutting: Bool; var fromBelow: Bool }
     let segments: [Segment]
     let engraved: [Grid2D]
     let placed: PlacedModel
@@ -719,7 +815,8 @@ final class SimRunner: @unchecked Sendable {
     private var index = 0
     private let queue = DispatchQueue(label: "swarf.sim", qos: .userInitiated)
     private let lock = NSLock()
-    private var pending: (Int, Bool, @MainActor (Grid2D, StockSimulator.Analysis?, (V3, Tool)?) -> Void)?
+    typealias Completion = @MainActor (Grid2D, Grid2D?, StockSimulator.Analysis?, (V3, Tool)?) -> Void
+    private var pending: (Int, Bool, Completion)?
     private var busy = false
 
     var segmentCount: Int { segments.count }
@@ -729,7 +826,7 @@ final class SimRunner: @unchecked Sendable {
         for tp in toolpaths {
             let pts = tp.tessellated(maxSegment: 1)
             for i in 1..<max(1, pts.count) {
-                segs.append(Segment(a: pts[i - 1].0, b: pts[i].0, tool: tp.tool, cutting: pts[i].1 != .rapid))
+                segs.append(Segment(a: pts[i - 1].0, b: pts[i].0, tool: tp.tool, cutting: pts[i].1 != .rapid, fromBelow: tp.side == .b))
             }
         }
         segments = segs
@@ -738,7 +835,7 @@ final class SimRunner: @unchecked Sendable {
         sim = StockSimulator(stockSize: placed.stockSize, resolution: StockSimulator.defaultResolution(for: placed.stockSize))
     }
 
-    func seek(to target: Int, analyze: Bool, completion: @escaping @MainActor (Grid2D, StockSimulator.Analysis?, (V3, Tool)?) -> Void) {
+    func seek(to target: Int, analyze: Bool, completion: @escaping Completion) {
         lock.lock()
         pending = (target, analyze, completion)
         let start = !busy
@@ -759,13 +856,14 @@ final class SimRunner: @unchecked Sendable {
             }
             while index < min(target, segments.count) {
                 let s = segments[index]
-                if s.cutting { sim.cut(from: s.a, to: s.b, tool: s.tool) }
+                if s.cutting { sim.cut(from: s.a, to: s.b, tool: s.tool, fromBelow: s.fromBelow) }
                 index += 1
             }
             let analysis = analyze ? sim.analyze(model: placed, tolerance: 0.1, engraved: engraved) : nil
             let stock = sim.stock
+            let bottom = sim.bottom
             let toolPos: (V3, Tool)? = index > 0 && index <= segments.count ? (segments[index - 1].b, segments[index - 1].tool) : nil
-            DispatchQueue.main.async { MainActor.assumeIsolated { completion(stock, analysis, toolPos) } }
+            DispatchQueue.main.async { MainActor.assumeIsolated { completion(stock, bottom, analysis, toolPos) } }
         }
     }
 }

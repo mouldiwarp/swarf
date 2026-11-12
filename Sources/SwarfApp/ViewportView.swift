@@ -203,7 +203,7 @@ final class ViewportMTKView: MTKView {
     func orbit(dx: CGFloat, dy: CGFloat) {
         renderer?.camera.yaw -= Float(dx) * 0.008
         guard let renderer else { return }
-        renderer.camera.pitch = max(-1.5, min(1.5707, renderer.camera.pitch + Float(dy) * 0.008))
+        renderer.camera.pitch = max(-1.5707, min(1.5707, renderer.camera.pitch + Float(dy) * 0.008))
         needsDisplay = true
     }
 
@@ -296,12 +296,12 @@ struct ViewportView: NSViewRepresentable {
         let pk = "\(model.toolpathVersion)|\(String(describing: selectedOp))|\(model.showRapids)"
         if pk != c.pathKey {
             c.pathKey = pk
-            r.setToolpaths(model.toolpaths, selected: model.simMode ? nil : selectedOp, showRapids: model.showRapids)
+            r.setToolpaths(model.displayToolpaths, selected: model.simMode ? nil : selectedOp, showRapids: model.showRapids)
             c.lastLimit = -1
         }
         if c.simVersion != model.simVersion {
             c.simVersion = model.simVersion
-            r.setSimulation(model.simStock, analysis: model.simAnalysis, stockTop: model.placed?.stockTop ?? 0)
+            r.setSimulation(model.simStock, bottom: model.simBottom, analysis: model.simAnalysis, stockTop: model.placed?.stockTop ?? 0)
             r.setOverlay(rect: nil, z: 0, tool: model.simMode && model.simPosition < 1 ? model.simToolPosition : nil)
         }
         let limit = model.simSegmentLimit
@@ -330,6 +330,8 @@ struct ViewportView: NSViewRepresentable {
         case .top: r.camera.yaw = 0; r.camera.pitch = 1.5707; r.camera.ortho = true
         case .front: r.camera.yaw = 0; r.camera.pitch = 0.0; r.camera.ortho = true
         case .right: r.camera.yaw = .pi / 2; r.camera.pitch = 0.0; r.camera.ortho = true
+        // From underneath, oriented as the stock lies after it is rolled over for side B (X left to right, back at the bottom).
+        case .bottom: r.camera.yaw = .pi; r.camera.pitch = -1.5707; r.camera.ortho = true
         }
     }
 }

@@ -11,6 +11,7 @@ func usage(_ reason: String? = nil) -> Never {
       --machine <id>        post-processor (default: workbee-z1plus-rrf); --list-machines to see all
       --material <id>       mdf, plywood, softwood, hardwood, acrylic, hdpe, foam, aluminium
       --quality <q>         draft | normal | fine
+      --margin <mm>         stock margin around the model in X and Y (default 5)
       --lay-flat            auto-orient largest flat face down
       --rotate <axis:deg>   rotate model, e.g. x:90 (repeatable)
       --ops <list>          comma list of operations (default: full processing template):
@@ -21,6 +22,8 @@ func usage(_ reason: String? = nil) -> Never {
       --simulate            run stock simulation and report gouges/leftover
       --png <file>          write a top-view preview (implies --simulate)
       --keepout x0,y0,x1,y1 add a keep-out rectangle in stock coordinates (repeatable)
+      --flip [mm]           two-sided job: dowel holes (mm into the spoilboard, default 5), side A, flip
+                            about X, side B. With --ops, prefix side-B operations with b:, e.g. b:pocket
       --test-cut [c,p,d]    test-cut mode: cutouts c mm deep, pockets and carving p mm, holes d mm
                             (default 8,4,4 for 9 mm MDF); output files are marked _TEST
     """)
@@ -38,7 +41,7 @@ args.removeFirst()
 
 var job = Job()
 var outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-var opsList: [OperationKind]? = nil
+var opsList: [(OperationKind, MachiningSide)]? = nil
 var simulate = false
 var layFlat = false
 var pngPath: String? = nil
@@ -82,6 +85,16 @@ while i < args.count {
             t.cutoutDepth = v[0]; t.pocketDepth = v[1]; t.drillDepth = v[2]
         }
         job.testCut = t
+    case "--flip":
+        job.flipSettings.enabled = true
+        if i + 1 < args.count, let d = Double(args[i + 1]) {
+            guard d.isFinite, d >= 0 else { usage("--flip takes a spoilboard depth in mm, 0 or more") }
+            job.flipSettings.spoilboardDepth = d
+            i += 1
+        }
+    case "--margin":
+        guard let m = Double(next()), m.isFinite, m >= 0 else { usage("--margin needs a size in mm, 0 or more") }
+        job.stock.marginXY = m
     case "--lay-flat": layFlat = true
     case "--rotate":
         let parts = next().split(separator: ":")
@@ -98,10 +111,12 @@ while i < args.count {
         guard let d = Double(next()), d.isFinite, d >= 0 else { usage("--vcarve-depth needs a depth in mm, 0 or more") }
         vSettings.maxDepth = d
     case "--ops":
-        var kinds: [OperationKind] = []
-        for name in next().split(separator: ",") {
+        var kinds: [(OperationKind, MachiningSide)] = []
+        for item in next().split(separator: ",") {
+            let sideB = item.hasPrefix("b:")
+            let name = sideB ? item.dropFirst(2) : item
             guard let k = OperationKind(rawValue: String(name)) else { usage("unknown operation \"\(name)\"") }
-            kinds.append(k)
+            kinds.append((k, sideB ? .b : .a))
         }
         guard !kinds.isEmpty else { usage("--ops needs at least one operation") }
         opsList = kinds
@@ -121,7 +136,7 @@ do {
     // Create a context once to get traits, then build operations, then the real context.
     let probe = CAMContext(raw: mesh, job: job)
     if let kinds = opsList {
-        job.operations = kinds.map { k in
+        job.operations = kinds.map { k, side in
             let tool: Tool = {
                 switch k {
                 case .parallelFinish, .waterlineFinish: return library.closest(kind: .ball, diameter: 6)!
@@ -131,6 +146,8 @@ do {
             }()
             var op = Operation(kind: k, tool: tool, material: material)
             if k == .vcarve { op.vcarveSettings = vSettings }
+            if k == .cutout { op.tabs.enabled = true }
+            op.machiningSide = side
             return op
         }
     } else {
@@ -164,9 +181,10 @@ do {
         let a = sim.analyze(model: ctx.placed, tolerance: 0.1, engraved: out.toolpaths.compactMap(\.engraveMask))
         print(String(format: "Simulation: removed %.1f cm³, gouge cells %d (max %.3f mm), leftover cells %d (max %.2f mm)",
                      a.removedVolume / 1000, a.gougeCells, a.maxGouge, a.leftoverCells, a.maxLeftover))
-        for v in StockSimulator.keepOutViolations(out.toolpaths, regions: job.regions, stockTop: ctx.stockTop) { print("  ✖︎ \(v)") }
+        if !a.undersideDeviation.isEmpty { print("  Underside (side B): gouge cells \(a.undersideGougeCells)") }
+        for v in StockSimulator.keepOutViolations(out.toolpaths, regions: job.regions, stockTop: ctx.stockTop, stockSize: ctx.placed.stockSize) { print("  ✖︎ \(v)") }
         if let png = pngPath {
-            let img = TopView.render(stock: sim.stock, stockSize: s, analysis: a, toolpaths: pngPaths ? out.toolpaths : [], regions: job.regions)
+            let img = TopView.render(stock: sim.stock, stockSize: s, analysis: a, toolpaths: pngPaths ? out.toolpaths.filter { $0.side == .a } : [], regions: job.regions)
             let ppm = URL(fileURLWithPath: png).deletingPathExtension().appendingPathExtension("ppm")
             try img.ppm.write(to: ppm)
             let p = Process()

@@ -1,8 +1,17 @@
 import Foundation
 
 public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable {
-    case facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout
+    case facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout, dowelHoles
     public var id: String { rawValue }
+
+    /// Strategies that may machine the back after a flip. The part is already cut out from side A, and the back is
+    /// never faced or engraved.
+    public var allowedOnSideB: Bool {
+        switch self {
+        case .pocket, .roughing, .parallelFinish, .waterlineFinish, .drill: return true
+        case .facing, .vcarve, .cutout, .dowelHoles: return false
+        }
+    }
 
     public var displayName: String {
         switch self {
@@ -14,6 +23,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .vcarve: return "V-Carve"
         case .drill: return "Drill (Peck)"
         case .cutout: return "Cutout (Profile)"
+        case .dowelHoles: return "Dowel Holes (Flip)"
         }
     }
 
@@ -27,6 +37,7 @@ public enum OperationKind: String, Codable, Sendable, CaseIterable, Identifiable
         case .vcarve: return "textformat"
         case .drill: return "smallcircle.filled.circle"
         case .cutout: return "scissors"
+        case .dowelHoles: return "pin"
         }
     }
 }
@@ -124,6 +135,12 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     }
     /// nil = every enabled region applies.
     public var regionIDs: [UUID]? = nil
+    /// Which face this operation machines in a two-sided job. nil = side A. Optional so older projects still open.
+    public var side: MachiningSide? = nil
+    public var machiningSide: MachiningSide {
+        get { side ?? .a }
+        set { side = newValue == .a ? nil : newValue }
+    }
 
     public init(kind: OperationKind, tool: Tool, material: Material = .named("mdf")) {
         self.kind = kind
@@ -156,6 +173,10 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
             cutting.stepdown = max(0.5, min(cutting.stepdown, tool.diameter * 0.5))
         case .cutout:
             boundary = .stock
+        case .dowelHoles:
+            boundary = .stock
+            drilling = DrillSettings()
+            cutting.stepdown = max(0.5, min(cutting.stepdown, tool.diameter * 0.5))
         }
     }
 
@@ -222,6 +243,14 @@ public struct Job: Codable, Sendable, Equatable {
     public var activeTestCut: TestCut? { testCut?.enabled == true ? testCut : nil }
     /// G-code file name chosen in the Export dialog (no extension). Nil uses the model name.
     public var exportName: String? = nil
+    /// Two-sided machining. Optional so projects saved before it existed still open.
+    public var flip: FlipSetup? = nil
+    public var flipSettings: FlipSetup {
+        get { flip ?? FlipSetup() }
+        set { flip = newValue }
+    }
+    /// The flip setup in force, or nil for a one-sided job.
+    public var activeFlip: FlipSetup? { flip?.enabled == true ? flip : nil }
 
     public init() {}
 }
@@ -240,7 +269,7 @@ public struct TestCut: Codable, Sendable, Equatable, Hashable {
     public func depth(for kind: OperationKind) -> Double? {
         switch kind {
         case .cutout: return cutoutDepth
-        case .drill: return drillDepth
+        case .drill, .dowelHoles: return drillDepth
         case .pocket, .roughing, .parallelFinish, .waterlineFinish, .vcarve: return pocketDepth
         case .facing: return nil
         }

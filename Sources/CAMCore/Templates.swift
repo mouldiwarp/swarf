@@ -23,8 +23,24 @@ public enum JobTemplates {
                            topBelowStock: m.stockTop - top > 0.05, touchesBottom: m.modelBounds.min.z < 0.01)
     }
 
-    /// "Full processing": facing → roughing → finishing → cutout with tabs.
+    /// "Full processing": facing → roughing → finishing → cutout with tabs. On a two-sided job: dowel holes, then
+    /// side A as above, then side B's pockets or 3D carving chosen from the underside.
     public static func fullProcessing(_ ctx: CAMContext, library: ToolLibrary, material: Material) -> [Operation] {
+        let side = singleSide(ctx, library: library, material: material)
+        guard ctx.job.activeFlip != nil else { return side }
+        let flat6 = library.closest(kind: .flat, diameter: 6) ?? ToolLibrary.starter.tools[0]
+        var dowels = Operation(kind: .dowelHoles, tool: flat6, material: material)
+        dowels.name = "Dowel holes"
+        let b = ctx.makeSideB()
+        var back = singleSide(b, library: library, material: material).filter { $0.kind.allowedOnSideB }
+        for i in back.indices {
+            back[i].machiningSide = .b
+            back[i].name += " (side B)"
+        }
+        return [dowels] + side + back
+    }
+
+    static func singleSide(_ ctx: CAMContext, library: ToolLibrary, material: Material) -> [Operation] {
         let t = traits(ctx)
         var ops: [Operation] = []
         let flat6 = library.closest(kind: .flat, diameter: 6) ?? ToolLibrary.starter.tools[0]

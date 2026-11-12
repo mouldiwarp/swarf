@@ -67,14 +67,15 @@
     <li><span>8</span>Operations</li>
     <li><span>9</span>Cutouts, finishing passes and tabs</li>
     <li><span>10</span>Peck drilling</li>
-    <li><span>11</span>V-carving</li>
-    <li><span>12</span>Keep-out regions</li>
-    <li><span>13</span>Simulation and checks</li>
-    <li><span>14</span>Exporting G-code</li>
-    <li><span>15</span>Running the job on a WorkBee</li>
-    <li><span>16</span>Troubleshooting</li>
-    <li><span>17</span>Command line</li>
-    <li><span>18</span>Keyboard shortcuts</li>
+    <li><span>11</span>Two-sided machining</li>
+    <li><span>12</span>V-carving</li>
+    <li><span>13</span>Keep-out regions</li>
+    <li><span>14</span>Simulation and checks</li>
+    <li><span>15</span>Exporting G-code</li>
+    <li><span>16</span>Running the job on a WorkBee</li>
+    <li><span>17</span>Troubleshooting</li>
+    <li><span>18</span>Command line</li>
+    <li><span>19</span>Keyboard shortcuts</li>
   </ol>
 
   <h2 style="margin-top:18pt">1 · Before you start</h2>
@@ -182,9 +183,10 @@ open build/Swarf.app</pre>
     <tr><td>3D Roughing</td><td>Removing bulk material from curved shapes layer by layer, leaving stock for finishing.</td></tr>
     <tr><td>3D Finish – Parallel</td><td>Smooth surfaces with a ball nose, in raster passes at any angle. Optionally only on slopes below a set angle.</td></tr>
     <tr><td>3D Finish – Waterline</td><td>Steep walls, using constant-height contours. Optionally only on slopes above a set angle.</td></tr>
-    <tr><td>V-Carve</td><td>Lettering and logos with a V-bit (see chapter 11).</td></tr>
+    <tr><td>V-Carve</td><td>Lettering and logos with a V-bit (see chapter 12).</td></tr>
     <tr><td>Drill (Peck)</td><td>Round holes that match the tool size (see chapter 10).</td></tr>
     <tr><td>Cutout (Profile)</td><td>Cutting the part free with tabs (see chapter 9).</td></tr>
+    <tr><td>Dowel Holes (Flip)</td><td>Registration holes for machining both sides (see chapter 11).</td></tr>
   </table>
   <h3>Settings every operation has</h3>
   <ul>
@@ -230,8 +232,47 @@ open build/Swarf.app</pre>
     <li>The output is plain G0/G1 moves, so it runs on any firmware.</li>
   </ul>
   <div class="tip">Drill <b>before</b> the cutout, so the part is still held while it's drilled.</div>
+</section>
 
-  <h2 style="margin-top:16pt">11 · V-carving</h2>
+<section class="chapter">
+  <h2>11 · Two-sided machining (flip)</h2>
+  <p>Some parts need work on both faces, such as a guitar body with a carved top and control cavities in the back, or a neck.
+    Swarf machines them in four steps. The stock is located by two dowels, so the X/Y zero never changes.</p>
+  <ol class="steps">
+    <li><b>Dowel holes.</b> With the stock clamped down, two 6 mm holes are pecked through the stock and 5 mm into the spoilboard.
+      They sit on the stock's centre line (front to back), one in the waste beyond each end of the part.</li>
+    <li><b>Side A (the top).</b> The top is machined and the part cut out with tabs, as in a one-sided job.</li>
+    <li><b>Flip.</b> Lift the stock, push 6 mm dowels into the spoilboard holes, roll the stock over front-to-back (about the X axis; the
+      ends stay where they are) and drop it onto the dowels. Clamp it. Keep the X/Y zero and re-probe Z on the new top.</li>
+    <li><b>Side B (the back).</b> The back is machined: cavities, carving and holes.</li>
+  </ol>
+  <h3>Setting it up</h3>
+  <ul>
+    <li>Turn on <b>Machine both sides (flip)</b> under <b>Stock &amp; Work Zero</b>. A <b>Dowel holes</b> operation is added at the top of the list.</li>
+    <li>The stock needs room at both ends: about 25 mm between the part and each stock end on the centre line with a 6 mm cutter.
+      Increase the <b>XY margin</b> or the stock size if Swarf says there is no room.</li>
+    <li><b>Dowel holes into spoilboard</b> (5 mm by default) and <b>Dowel clearance from part</b> set the hole depth and how far the holes stay from the cutout.
+      The holes are as deep as the stock plus the spoilboard depth. Swarf refuses holes deeper than the cutter's flute length, so the collet can't reach the stock;
+      with a 50 mm cutter, 45 mm stock is about the limit.</li>
+    <li>Set an operation's <b>Side</b> to <b>B</b> in its inspector, or right-click it and choose <b>Move to Side B</b>. Pockets, 3D roughing and finishing,
+      and drilling can run on side B. Cutouts, facing and V-carving can't: the part is already cut out from side A.</li>
+    <li><b>Full Processing</b> on a two-sided job adds the dowel holes, side A as usual (finishing with the cutout), and side B: pockets for
+      flat-floored cavities, or roughing and finishing for a carved back.</li>
+    <li>The sidebar lists the operations under <b>Dowel holes</b>, <b>Side A</b> and <b>Side B</b>, in the order they run.</li>
+  </ul>
+  <h3>What side B leaves alone</h3>
+  <p>The part hangs in the stock by the tabs from side A's cutout. Side B never cuts the frame of stock around the part (it holds the dowels and the clamps),
+    and never cuts where the tabs are. Keep-out boxes are drawn on the side-A view and apply to side B in the same place on the part, over their full depth.</p>
+  <h3>Viewing and simulating</h3>
+  <p>Side-B toolpaths are drawn under the part, where they cut. Use <b>Bottom</b> view (⌘4) to look at the back as it lies after the flip.
+    The simulation cuts side B from below and checks the back for gouges too.</p>
+  <h3>Exporting</h3>
+  <p>Each step is written to its own numbered set of files, such as <code>Body_1_dowels.gcode</code>, <code>Body_2_sideA.gcode</code> and
+    <code>Body_3_sideB.gcode</code>. Each file starts with comments saying what to do before running it. Side-B coordinates are what the machine sees after the flip.</p>
+</section>
+
+<section class="chapter">
+  <h2>12 · V-carving</h2>
   <p><b>V-Carve</b> engraves with a V-bit. The bit follows the centre line of each shape and goes deeper where the shape is wider,
     so edges and corners stay sharp. <b>Engrave</b> chooses what is carved:</p>
   <ul>
@@ -243,7 +284,7 @@ open build/Swarf.app</pre>
 </section>
 
 <section class="chapter">
-  <h2>12 · Keep-out regions</h2>
+  <h2>13 · Keep-out regions</h2>
   <p>Keep-out boxes protect features you don't want milled, or cover clamps.</p>
   <ol class="steps">
     <li>Click the draw-keep-out tool in the viewport strip (or the button next to <b>Regions</b>, ⌥⌘K) and drag a box in the 3D view.</li>
@@ -252,7 +293,7 @@ open build/Swarf.app</pre>
   </ol>
   <p>The cutter stays a full radius away from keep-outs in every operation except cutouts. The simulator reports any keep-out violations.</p>
 
-  <h2 style="margin-top:16pt">13 · Simulation and checks</h2>
+  <h2 style="margin-top:16pt">14 · Simulation and checks</h2>
   <p>Click <b>Simulate</b> (⌘R) to remove material from a virtual block of stock. Use the scrubber or play button to watch the job. Below the scrubber you'll see:</p>
   <ul>
     <li><b>Gouges</b>: places cut deeper than the model, shown in red. A good job says <b>No gouges</b>.</li>
@@ -264,7 +305,7 @@ open build/Swarf.app</pre>
 </section>
 
 <section class="chapter">
-  <h2>14 · Exporting G-code</h2>
+  <h2>15 · Exporting G-code</h2>
   <figure class="w85"><img src="../screenshot-export.png" alt="Export sheet"><figcaption>The export sheet, with a preview of the WorkBee G-code.</figcaption></figure>
   <ol class="steps">
     <li>Click <b>Export G-code</b> (⌘E). Check the machine, the list of files, the stock size, the zero point and the run time.</li>
@@ -273,7 +314,7 @@ open build/Swarf.app</pre>
   </ol>
   <p>For the WorkBee, Swarf writes <b>one file per tool</b>, numbered in the order they run. Other machines get a single file with tool-change commands where the controller supports them.</p>
 
-  <h2 style="margin-top:16pt">15 · Running the job on a WorkBee</h2>
+  <h2 style="margin-top:16pt">16 · Running the job on a WorkBee</h2>
   <ol class="steps">
     <li>Fix the stock down, keeping clamps outside the toolpaths (or covered by keep-outs).</li>
     <li>Fit the first tool. Jog to the <b>work zero shown in the setup sheet</b> (by default the centre of the stock's left edge) and set X and Y zero.</li>
@@ -285,7 +326,7 @@ open build/Swarf.app</pre>
 </section>
 
 <section class="chapter compact">
-  <h2>16 · Troubleshooting</h2>
+  <h2>17 · Troubleshooting</h2>
   <table>
     <tr><th style="width:36%">Problem</th><th>What to try</th></tr>
     <tr><td>"Operation produced no toolpath" or "Nothing to clear"</td><td>The tool may be too big for the feature, or the boundary excludes it. Try a smaller tool, or change the Area boundary.</td></tr>
@@ -297,7 +338,7 @@ open build/Swarf.app</pre>
     <tr><td>Model too small or large</td><td>It was probably modelled in inches or metres. Set the scale under Model &amp; Orientation.</td></tr>
   </table>
 
-  <h2 style="margin-top:16pt">17 · Command line</h2>
+  <h2 style="margin-top:16pt">18 · Command line</h2>
   <p><code>swarf-cli</code> runs the same engine without the app:</p>
 <pre>swift build -c release
 .build/release/swarf-cli model.stl --out ./gcode --simulate --png preview.png
@@ -305,9 +346,10 @@ open build/Swarf.app</pre>
 .build/release/swarf-cli --list-machines</pre>
   <p>Options: <code>--machine</code>, <code>--material</code>, <code>--quality draft|normal|fine</code>, <code>--lay-flat</code>, <code>--rotate x:90</code>,
     <code>--ops</code> (facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout), <code>--keepout x0,y0,x1,y1</code>,
-    <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>.</p>
+    <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>, <code>--margin</code>,
+    <code>--flip [mm]</code> (two-sided job; prefix side-B operations with <code>b:</code>, e.g. <code>--ops dowelHoles,pocket,cutout,b:pocket</code>).</p>
 
-  <h2 style="margin-top:16pt">18 · Keyboard shortcuts</h2>
+  <h2 style="margin-top:16pt">19 · Keyboard shortcuts</h2>
   <table>
     <tr><th>Action</th><th>Shortcut</th><th>Action</th><th>Shortcut</th></tr>
     <tr><td>Import STL</td><td>⇧⌘I</td><td>Lay flat</td><td>⌥⌘L</td></tr>
@@ -316,6 +358,7 @@ open build/Swarf.app</pre>
     <tr><td>Export G-code</td><td>⌘E</td><td>Rotate 90° about X / Y / Z</td><td>⌥⌘X / ⌥⌘Y / ⌥⌘Z</td></tr>
     <tr><td>Settings / tool library</td><td>⌘,</td><td>Draw keep-out</td><td>⌥⌘K</td></tr>
     <tr><td>Undo / Redo</td><td>⌘Z / ⇧⌘Z</td><td>Move / delete selected keep-out</td><td>Arrows / ⌫</td></tr>
+    <tr><td>Iso / Top / Front / Right view</td><td>⌘0 / ⌘1 / ⌘2 / ⌘3</td><td>Bottom view (side B)</td><td>⌘4</td></tr>
   </table>
   <p style="color:var(--muted); font-size:9pt; margin-top:18pt">Swarf is free software under the MIT License, provided "as is", without warranty of any kind.
     Source, issues and contributions: github.com/mouldiwarp/swarf.</p>

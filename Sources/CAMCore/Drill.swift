@@ -171,13 +171,20 @@ extension CAMContext {
         }
 
         var b = builder(op)
+        peckHoles(order.map { ($0.center, holeBottom($0, op)) }, op: op, b: &b, progress: progress)
+        var tp = makeToolpath(op, b)
+        tp.warnings = warnings
+        return tp
+    }
+
+    /// Pecks each hole in turn from the stock top down to its bottom, then retracts to the safe height.
+    func peckHoles(_ holes: [(V2, Double)], op: Operation, b: inout PathBuilder, progress: ProgressHandler?) {
+        let s = op.drillSettings
         let top = stockTop
         let rPlane = min(safeZ, top + 1)
         let peck = max(0.1, op.cutting.stepdown)
         let lift = max(0.1, s.chipBreakLift)
-        for (k, hole) in order.enumerated() {
-            let c = hole.center
-            let bottom = holeBottom(hole, op)
+        for (k, (c, bottom)) in holes.enumerated() {
             if b.pos.z < safeZ - 1e-9 { b.retract() }
             b.rapid(V3(c.x, c.y, safeZ))
             b.rapid(V3(c.x, c.y, rPlane))
@@ -194,12 +201,9 @@ extension CAMContext {
                 }
             }
             b.rapid(V3(c.x, c.y, rPlane))
-            progress?(Double(k + 1) / Double(order.count))
+            progress?(Double(k + 1) / Double(holes.count))
         }
         b.retract()
-        var tp = makeToolpath(op, b)
-        tp.warnings = warnings
-        return tp
     }
 
     /// Tip Z for a hole: its floor (plus Z stock to leave), or below the stock for through holes.

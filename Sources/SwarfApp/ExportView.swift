@@ -73,7 +73,10 @@ struct ExportView: View {
                                 Text("Zero: \(model.job.origin.y.rawValue)-\(model.job.origin.x.rawValue), \(model.job.origin.z == .stockTop ? "top of stock" : "bed")")
                             }
                             Text("Estimated time: " + (preparing ? "…" : formatDuration(estimate)))
-                            if profile.splitFilesPerTool && files.count > 1 {
+                            if model.job.activeFlip != nil && model.toolpaths.contains(where: { $0.side == .b }) {
+                                Label("Two-sided job: run the files in order. After side A, put dowels in the spoilboard holes, roll the stock over front-to-back onto them, keep the X/Y zero and re-probe Z before side B.",
+                                      systemImage: "arrow.triangle.2.circlepath").font(.caption).fixedSize(horizontal: false, vertical: true)
+                            } else if profile.splitFilesPerTool && files.count > 1 {
                                 Label("Run the files in order. Change the bit and re-probe Z between them.", systemImage: "info.circle").font(.caption)
                             }
                         }
@@ -205,6 +208,7 @@ struct ExportView: View {
         let issues = model.exportIssues
         let regions = model.job.regions
         let stockTop = model.placed?.stockTop
+        let stockSize = model.placed?.stockSize
         let profile = self.profile
         preparing = true
         buildTask = Task {
@@ -216,7 +220,7 @@ struct ExportView: View {
                 if files.isEmpty && w.isEmpty { w.append("There are no toolpaths to export. Add an operation first.") }
                 w += post.validate(toolpaths)
                 w += toolpaths.flatMap { tp in tp.warnings.map { "\(tp.name): \($0)" } }
-                w += StockSimulator.keepOutViolations(toolpaths, regions: regions, stockTop: stockTop)
+                w += StockSimulator.keepOutViolations(toolpaths, regions: regions, stockTop: stockTop, stockSize: stockSize)
                 let secs = toolpaths.reduce(0) { $0 + $1.stats(rapidRate: profile.rapidRate, acceleration: profile.acceleration).seconds }
                 return (files, counts, w, secs)
             }.value
@@ -326,6 +330,7 @@ struct SetupSheet: View {
     var body: some View {
         let stockSize = model.placed?.stockSize ?? .zero
         let stockTop = model.placed?.stockTop ?? 0
+        let flip = model.job.activeFlip != nil
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading) {
@@ -356,6 +361,16 @@ struct SetupSheet: View {
                 }
                 .font(.system(size: 11))
             }
+            if flip {
+                Text("Two-sided job").font(.headline).padding(.top, 8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "1. Clamp the stock. Drill the dowel holes (%.1f mm into the spoilboard).", model.job.flipSettings.spoilboardDepth))
+                    Text("2. Machine side A (top) and cut the part out. It stays held by tabs.")
+                    Text("3. Lift the stock, push dowels into the spoilboard holes, roll the stock over front-to-back onto them. Clamp it.")
+                    Text("4. Keep the X/Y zero, re-probe Z on the new top, and machine side B (back).")
+                }
+                .font(.system(size: 10))
+            }
             Text("Operations").font(.headline).padding(.top, 8)
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                 GridRow {
@@ -366,7 +381,7 @@ struct SetupSheet: View {
                     let op = model.job.operations.first { $0.id == tp.id }
                     GridRow {
                         Text("\(i + 1)")
-                        Text(tp.name)
+                        Text(flip ? "\(tp.flipStage == .sideB ? "B" : tp.flipStage == .dowels ? "Dowels" : "A") · \(tp.name)" : tp.name)
                         Text("T\(tp.tool.number) \(tp.tool.name)")
                         Text("\(Int(tp.rpm))")
                         Text("\(Int(op?.cutting.feed ?? 0))")

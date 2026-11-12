@@ -206,6 +206,21 @@ struct StockInspector: View {
                 Text("Try the job on scrap such as 9 mm MDF. Every cut stops at these depths below the stock top, so the cutout leaves a thin skin holding the part. Facing is not limited. Zero Z on the top of the test board.")
                     .font(.caption)
             }
+            Section {
+                Toggle("Machine both sides (flip)", isOn: Binding(get: { model.job.activeFlip != nil }, set: { model.setFlip($0) }))
+                if model.job.activeFlip != nil {
+                    NumberField(title: "Dowel holes into spoilboard", value: model.jobBinding(\.flipSettings.spoilboardDepth, name: "Spoilboard Depth"),
+                                unit: "mm", step: 0.5, range: 0...30)
+                    NumberField(title: "Dowel clearance from part", value: model.jobBinding(\.flipSettings.clearance, name: "Dowel Clearance"),
+                                unit: "mm", step: 0.5, range: 0...100)
+                    if !model.job.operations.contains(where: { $0.kind == .dowelHoles }) {
+                        Button("Add Dowel Holes") { model.addOperation(.dowelHoles) }
+                    }
+                }
+            } header: { Text("Two-sided machining") } footer: {
+                Text("Dowel holes go through the stock on its centre line, beyond each end of the part. Side A (the top) is machined and cut out with tabs; then the stock is rolled over front-to-back onto dowels in those holes and side B (the back) is machined. Keep the X/Y zero; re-probe Z. The stock needs room for the holes at both ends.")
+                    .font(.caption)
+            }
             Section("Model position in stock") {
                 Picker("Vertical", selection: model.jobBinding(\.stock.modelZ)) {
                     Text("Flush with top").tag(ModelZPlacement.top)
@@ -385,6 +400,16 @@ struct OperationInspector: View {
                 TextField("Name", text: b(\.name))
                 LabeledContent("Strategy") { Label(op.kind.displayName, systemImage: op.kind.symbol) }
                 Toggle("Enabled", isOn: b(\.enabled))
+                if model.job.activeFlip != nil && op.kind != .dowelHoles {
+                    if op.kind.allowedOnSideB || op.machiningSide == .b {
+                        Picker("Side", selection: Binding(get: { op.machiningSide }, set: { model.setSide($0, for: id) })) {
+                            ForEach(MachiningSide.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                    } else {
+                        LabeledContent("Side", value: MachiningSide.a.displayName)
+                    }
+                }
                 statusRow(op)
             }
             Section("Tool") {
@@ -409,11 +434,11 @@ struct OperationInspector: View {
                 NumberField(title: "Spindle", value: b(\.cutting.rpm), unit: "RPM", step: 500, range: 0...60000, digits: 0)
                 NumberField(title: "Feed", value: b(\.cutting.feed), unit: "mm/min", step: 50, range: 1...20000, digits: 0)
                 NumberField(title: "Plunge", value: b(\.cutting.plunge), unit: "mm/min", step: 25, range: 1...10000, digits: 0)
-                NumberField(title: op.kind == .waterlineFinish ? "Z step" : op.kind == .drill ? "Peck depth" : "Stepdown", value: b(\.cutting.stepdown), step: 0.1, range: 0.05...50)
-                if op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill {
+                NumberField(title: op.kind == .waterlineFinish ? "Z step" : op.kind == .drill || op.kind == .dowelHoles ? "Peck depth" : "Stepdown", value: b(\.cutting.stepdown), step: 0.1, range: 0.05...50)
+                if op.kind != .cutout && op.kind != .waterlineFinish && op.kind != .drill && op.kind != .dowelHoles {
                     NumberField(title: "Stepover", value: b(\.cutting.stepoverPercent), unit: String(format: "%% (%.2f)", op.stepover), step: 1, range: 1...100, digits: 0)
                 }
-                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing && op.kind != .vcarve && op.kind != .drill {
+                if op.kind != .parallelFinish && op.kind != .waterlineFinish && op.kind != .facing && op.kind != .vcarve && op.kind != .drill && op.kind != .dowelHoles {
                     NumberField(title: "Ramp angle", value: b(\.cutting.rampAngle), unit: "°", step: 0.5, range: 0.5...45, digits: 1)
                 }
                 let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(model.job.stock.materialID))
@@ -450,7 +475,7 @@ struct OperationInspector: View {
                 }
             }
             kindSpecific(op)
-            if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve && op.kind != .drill {
+            if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve && op.kind != .drill && op.kind != .dowelHoles {
                 Section("Area") {
                     Picker("Boundary", selection: b(\.boundary)) {
                         ForEach(BoundaryMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
@@ -463,7 +488,7 @@ struct OperationInspector: View {
                     }
                 }
             }
-            if op.kind != .facing && op.kind != .vcarve && op.kind != .drill {
+            if op.kind != .facing && op.kind != .vcarve && op.kind != .drill && op.kind != .dowelHoles {
                 Section("Stock to leave") {
                     NumberField(title: "Radial (XY)", value: b(\.stockToLeaveXY), step: 0.05, range: 0...10)
                     if op.kind != .cutout { NumberField(title: "Axial (Z)", value: b(\.stockToLeaveZ), step: 0.05, range: 0...10) }
@@ -561,6 +586,27 @@ struct OperationInspector: View {
                             op.drillSettings.diameterTolerance, op.tool.diameter,
                             op.drillSettings.retract == .full ? "back out above the stock to clear chips" : "a small lift to break the chip"))
                     .font(.caption).foregroundStyle(.secondary)
+            }
+        case .dowelHoles:
+            Section("Dowel holes") {
+                Picker("Retract", selection: b(\.drillSettings.retract)) {
+                    ForEach(PeckRetract.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                NumberField(title: "Into spoilboard", value: model.jobBinding(\.flipSettings.spoilboardDepth, name: "Spoilboard Depth"),
+                            unit: "mm", step: 0.5, range: 0...30)
+                NumberField(title: "Clearance from part", value: model.jobBinding(\.flipSettings.clearance, name: "Dowel Clearance"),
+                            unit: "mm", step: 0.5, range: 0...100)
+                let thick = model.placed?.stockTop ?? 0
+                let depth = thick + model.job.flipSettings.spoilboardDepth
+                LabeledContent("Hole depth", value: String(format: "%.1f mm (%.1f stock + %.1f)", depth, thick, model.job.flipSettings.spoilboardDepth))
+                if depth > op.tool.fluteLength {
+                    Label(String(format: "Deeper than the %.0f mm the cutter can reach. Use thinner stock, a longer cutter or less spoilboard depth.", op.tool.fluteLength),
+                          systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                }
+                Text(String(format: "Two Ø%.3g mm holes on the stock's centre line, one in the waste beyond each end of the part, pecked through the stock and into the spoilboard. After side A, put Ø%.3g mm dowels in the spoilboard holes, roll the stock over front-to-back onto them and re-probe Z.",
+                            op.tool.diameter, op.tool.diameter))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         case .cutout:
             Section("Cutout") {
