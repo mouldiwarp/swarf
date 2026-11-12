@@ -159,7 +159,7 @@ extension CAMContext {
             switch op.boundary {
             case .stock: return p.x >= -R && p.y >= -R && p.x <= s.x + R && p.y <= s.y + R
             case .silhouette: return Double(silhouetteDistance.sample(p)) <= op.boundaryMargin + wallOffset
-            case .insideSilhouette: return silhouetteDistance.sample(p) <= 0
+            case .insideSilhouette: return insideOrEnclosed(p, band: enclosedHoleBand(op))
             }
         }
         var levels: [Double] = []

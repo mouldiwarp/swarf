@@ -255,6 +255,42 @@ import simd
         #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
     }
 
+    @Test func pocketReachesAcrossAnEnclosedHole() throws {
+        // A cavity whose floor is a 4 mm ring around a through-hole: narrower than the 6 mm cutter, so with the hole
+        // out of bounds the cutter could never get in. The hole is waste, so the cutter may sweep over its edge and
+        // clear the ring, but it must not spend time clearing the middle of the hole.
+        let mesh = Mesh(triangles: Self.ring(inner: 10, outer: 14, z0: 0, z1: 3) + Self.ring(inner: 14, outer: 30, z0: 0, z1: 12))
+        var job = Job()
+        job.quality = .draft
+        let tool = lib.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .pocket, tool: tool, material: material())
+        op.boundary = .insideSilhouette
+        job.operations = [op]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let tp = try ctx.generate(op)
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run([tp])
+        let a = sim.analyze(model: ctx.placed)
+        #expect(a.gougeCells == 0)
+        // The floor ring (radius 10 to 14) is cleared down to the floor.
+        let centre = ctx.placed.modelBounds.min.xy + V2(30, 30)
+        var high = 0, ringCells = 0
+        for y in 0..<sim.stock.height {
+            for x in 0..<sim.stock.width {
+                let r = simd_length(sim.stock.world(x, y) - centre)
+                guard r > 10.5 && r < 13.5 else { continue }
+                ringCells += 1
+                if sim.stock[x, y] > 3.1 { high += 1 }
+            }
+        }
+        #expect(ringCells > 100)
+        #expect(high == 0, "\(high) of \(ringCells) cells of the floor ring are not cut down to the floor")
+        // The cutter centre stays within the band (a diameter plus 1 mm) inside the hole's edge, never deeper.
+        let deepest = tp.moves.filter { $0.kind != .rapid && $0.to.z < ctx.stockTop - 0.5 }.map { simd_length($0.to.xy - centre) }.min() ?? 0
+        #expect(deepest > 10 - 7 - 3 - ctx.res, "the cutter goes \(10 - deepest) mm into the hole")
+        #expect(deepest < 10, "the cutter never goes over the hole")
+    }
+
     @Test func pocketPassesFollowCurvesSmoothly() throws {
         // Every concentric pass in a round cavity should be a smooth curve. Passes traced from the grid wobble: their
         // turning direction flips back and forth, which makes the machine brake and accelerate at every segment.

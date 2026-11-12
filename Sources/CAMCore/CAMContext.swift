@@ -28,6 +28,16 @@ public final class CAMContext: @unchecked Sendable {
     /// Distance (mm) from each cell to the model silhouette (0 inside).
     public let silhouetteDistance: Grid2D
     public let flatLevels: [Double]
+    /// Holes in the silhouette that the part surrounds completely (a slot, a pot hole): for each such cell, the lowest
+    /// model surface around the hole's edge; NaN everywhere else. "Inside model only" boundaries treat a band just inside
+    /// such a hole (`enclosedHoleBand`) as filled to that height, so the cutter can sweep over the hole's edge and clear
+    /// strips too narrow for it between the hole and a wall. Inside the hole is only ever waste; the rest of the hole
+    /// stays out of bounds so a pocket doesn't spend time clearing it (on side B it is usually already cut through).
+    public let enclosedHoleFill: [Float]
+    /// For cells of an enclosed hole: distance (mm) to the nearest wall around it, i.e. surface more than 0.5 mm above
+    /// the hole's fill height (searched up to `CAMContext.holeWallReach`); infinity elsewhere.
+    let enclosedHoleWallDistance: [Float]
+    static let holeWallReach = 30.0
     /// Which face this context machines. Side B's `placed` is side A's rolled about X.
     public let side: MachiningSide
     /// Side B only: the stock frame and tabs that must not be cut.
@@ -85,6 +95,81 @@ public final class CAMContext: @unchecked Sendable {
         let d = DistanceTransform.distance(width: h.width, height: h.height, res: res) { h.data[$0] > Grid2D.none / 2 }
         silhouetteDistance = Grid2D(like: h, data: d)
         flatLevels = placed.mesh.flatUpwardFaceHeights()
+        (enclosedHoleFill, enclosedHoleWallDistance) = CAMContext.enclosedHoles(h)
+    }
+
+    /// See `enclosedHoleFill`. Empty cells reachable from the grid border (4-connected) are outside the part; every other
+    /// empty region is a hole, filled with the lowest surface height bordering it.
+    static func enclosedHoles(_ h: Grid2D) -> (fill: [Float], wallDistance: [Float]) {
+        let W = h.width, H = h.height
+        let empty = { (i: Int) in h.data[i] <= Grid2D.none / 2 }
+        var fill = [Float](repeating: .nan, count: W * H)
+        // 0 = unvisited, 1 = outside, 2 = in a hole (already filled)
+        var mark = [UInt8](repeating: 0, count: W * H)
+        var stack: [Int] = []
+        func push(_ i: Int) { if mark[i] == 0 && empty(i) { mark[i] = 1; stack.append(i) } }
+        for x in 0..<W { push(x); push((H - 1) * W + x) }
+        for y in 0..<H { push(y * W); push(y * W + W - 1) }
+        while let c = stack.popLast() {
+            let x = c % W, y = c / W
+            if x > 0 { push(c - 1) }
+            if x < W - 1 { push(c + 1) }
+            if y > 0 { push(c - W) }
+            if y < H - 1 { push(c + W) }
+        }
+        var wallDistance = [Float](repeating: .infinity, count: W * H)
+        for start in 0..<(W * H) where mark[start] == 0 && empty(start) {
+            var cells: [Int] = []
+            var rim = Float.infinity
+            var x0 = W, x1 = 0, y0 = H, y1 = 0
+            mark[start] = 2; stack = [start]
+            while let c = stack.popLast() {
+                cells.append(c)
+                x0 = min(x0, c % W); x1 = max(x1, c % W); y0 = min(y0, c / W); y1 = max(y1, c / W)
+                let x = c % W, y = c / W
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] where nx >= 0 && ny >= 0 && nx < W && ny < H {
+                    let n = ny * W + nx
+                    if empty(n) {
+                        if mark[n] == 0 { mark[n] = 2; stack.append(n) }
+                    } else {
+                        rim = min(rim, h.data[n])
+                    }
+                }
+            }
+            guard rim.isFinite else { continue }
+            for c in cells { fill[c] = rim }
+            // Distance from the hole's cells to walls around it, on a crop of the grid.
+            let m = Int(ceil(holeWallReach / h.res))
+            let cx0 = max(0, x0 - m), cx1 = min(W - 1, x1 + m), cy0 = max(0, y0 - m), cy1 = min(H - 1, y1 + m)
+            let cw = cx1 - cx0 + 1, ch = cy1 - cy0 + 1
+            let wall = rim + 0.5
+            let d = DistanceTransform.distance(width: cw, height: ch, res: h.res) { k in
+                h.data[(cy0 + k / cw) * W + cx0 + k % cw] > wall
+            }
+            for c in cells { wallDistance[c] = d[(c / W - cy0) * cw + (c % W - cx0)] }
+        }
+        return (fill, wallDistance)
+    }
+
+    /// How far into an enclosed hole (from its edge) "inside model only" lets this operation's cutter go: a cutter
+    /// diameter plus 1 mm, so it can reach across the edge from either side. Only near a wall, though: where the floor
+    /// between the hole and the nearest wall is wider than the cutter, it can already reach the edge from the floor.
+    func enclosedHoleBand(_ op: Operation) -> Double { op.tool.diameter + 2 * max(0, op.stockToLeaveXY) + 1 }
+
+    /// Whether cell `i` (a cell outside the silhouette, `d` mm from it) is in the band of an enclosed hole that this
+    /// operation may use.
+    @inline(__always) func inHoleBand(_ i: Int, _ d: Float, band: Float) -> Bool {
+        !enclosedHoleFill[i].isNaN && d <= band && enclosedHoleWallDistance[i] <= 2 * band
+    }
+
+    /// True inside the silhouette, or in the band of a hole the part surrounds (see `enclosedHoleFill`).
+    func insideOrEnclosed(_ p: V2, band: Double) -> Bool {
+        let d = silhouetteDistance.sample(p)
+        if d <= 0 { return true }
+        let c = heights.cellCoord(p)
+        let x = Int(c.x.rounded()), y = Int(c.y.rounded())
+        guard x >= 0, y >= 0, x < heights.width, y < heights.height else { return false }
+        return inHoleBand(y * heights.width + x, d, band: Float(band))
     }
 
     /// Widest border kept around the stock for cutter overhang and boundary margins (mm).
@@ -152,6 +237,8 @@ public final class CAMContext: @unchecked Sendable {
         let margin = Float(op.boundaryMargin + R)
         let res = g.res
         let frame = protection
+        let holes = enclosedHoleFill
+        let band = Float(enclosedHoleBand(op))
         let top = Float(stockTop)
         for y in 0..<g.height {
             for x in 0..<g.width {
@@ -166,7 +253,10 @@ public final class CAMContext: @unchecked Sendable {
                 case .silhouette:
                     if outsideStock || sil.data[i] > margin { v = Grid2D.forbid }
                 case .insideSilhouette:
-                    if sil.data[i] > 0 { v = Grid2D.forbid }
+                    if sil.data[i] > 0 {
+                        let f = holes[i]
+                        v = inHoleBand(i, sil.data[i], band: band) ? max(f, floor) + leaveZ : Grid2D.forbid
+                    }
                 }
                 if !onlyRegions.isEmpty && !onlyRegions.contains(where: { $0.contains(p, inflate: R) }) { v = Grid2D.forbid }
                 for r in keepOuts where r.contains(p, inflate: res) {

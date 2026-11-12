@@ -193,7 +193,10 @@ open build/Swarf.app</pre>
     <li><b>Tool</b> from the library, and its <b>Tool number (T)</b>.</li>
     <li><b>Feeds &amp; speeds:</b> spindle RPM, feed, plunge, stepdown (the depth of each pass), stepover (the sideways step, as a percentage of the diameter) and ramp angle. <b>Reset to tool defaults</b> reloads them from the library. Library values are for MDF; for other materials Swarf scales them and says so in a banner over the 3D view, with the exact numbers.</li>
     <li><b>Depth:</b> turn on <b>Limit maximum depth</b> and enter how far below the stock top this operation may cut. It works for every strategy (pockets, roughing, finishing, cutouts, holes, V-carving, facing), and material below the limit is left. In test-cut mode the shallower of the two limits wins.</li>
-    <li><b>Area:</b> boundary (whole stock, model silhouette plus a margin, or inside the model only) and an optional custom bottom height.</li>
+    <li><b>Area:</b> boundary (whole stock, model silhouette plus a margin, or inside the model only) and an optional custom bottom height.
+      With <i>inside the model only</i>, a hole that goes right through the part (a pickup slot, a pot hole) is not a wall: near a wall,
+      the cutter may sweep up to a cutter width over the hole's edge, at the level of the floor around it. That clears floor strips
+      narrower than the cutter, such as between a slot and a cavity wall. The middle of the hole is left alone.</li>
     <li><b>Stock to leave:</b> radial (XY) and axial (Z) allowances for a later finishing operation.</li>
     <li><b>Direction:</b> climb or conventional milling.</li>
   </ul>

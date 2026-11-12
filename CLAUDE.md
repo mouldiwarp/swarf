@@ -18,6 +18,7 @@ scripts/build-app.sh [debug|release]                   # builds build/Swarf.app 
 swift build -c release && .build/release/swarf-cli Tests/Fixtures/dome_relief.stl --out out --simulate
 .build/release/swarf-cli model.stl --png preview.png [--png-no-paths]   # top view: gouges red, leftover blue
 .build/release/swarf-cli ~/Desktop/Project.swarf --out out --simulate   # reproduce a user's project exactly
+.build/release/swarf-cli Project.swarf --png-underside back.png         # side B result: leftover blue, gouges red
 scripts/make-guide.sh                                  # docs/guide/user-guide.html -> docs/Swarf-User-Guide.pdf (headless Chrome)
 ```
 
@@ -47,7 +48,9 @@ Three targets share one engine:
    field **before** `ToolDilation.dilate` (Dilation.swift, Metal GPU with CPU fallback) offsets it by the exact
    cutter shape. The result, `toolField(op)`, is the lowest safe tool-tip Z everywhere. It is cached by a
    string key, so **any new setting that affects the field must be added to that key**. 3D strategies
-   (roughing / parallel / waterline) get an extra conservative half-cell max pass.
+   (roughing / parallel / waterline) get an extra conservative half-cell max pass. With "inside model only",
+   holes the part surrounds (`enclosedHoleFill`) are not forbidden in a band a cutter width inside their edge, near
+   walls, filled to the lowest surface around the hole, so pockets can clear floor strips narrower than the cutter.
 5. Strategies are `CAMContext` extensions: Operations.swift (facing, pocket+roughing via `clearing`, parallel,
    waterline, cutout with tabs), VCarve.swift, Drill.swift. They read the tool field, build contours (marching
    squares in Contours.swift, Euclidean distance transforms in Grid.swift), and emit `Move`s via `PathBuilder`.

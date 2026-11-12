@@ -22,6 +22,8 @@ func usage(_ reason: String? = nil) -> Never {
       --out <dir>           output directory (default: current)
       --simulate            run stock simulation and report gouges/leftover
       --png <file>          write a top-view preview (implies --simulate)
+      --png-underside <file> write the back as machined on side B, seen after the flip: leftover blue,
+                            gouges red, side-B toolpaths cyan (implies --simulate)
       --keepout x0,y0,x1,y1 add a keep-out rectangle in stock coordinates (repeatable)
       --flip [mm]           two-sided job: dowel holes (mm into the spoilboard, default 5), side A, flip
                             about X, side B. With --ops, prefix side-B operations with b:, e.g. b:pocket
@@ -60,6 +62,7 @@ var simulate = false
 var layFlat = false
 var pngPath: String? = nil
 var pngPaths = true
+var undersidePath: String? = nil
 var keepOuts: [Region] = []
 var flipDepth: Double? = nil
 var vSettings = VCarveSettings()
@@ -86,6 +89,7 @@ while i < args.count {
     case "--simulate": simulate = true
     case "--png": pngPath = next(); simulate = true
     case "--png-no-paths": pngPaths = false
+    case "--png-underside": undersidePath = next(); simulate = true
     case "--keepout":
         // x0,y0,x1,y1 in stock space
         let v = next().split(separator: ",").compactMap { Double($0) }
@@ -201,8 +205,14 @@ do {
                      a.removedVolume / 1000, a.gougeCells, a.maxGouge, a.leftoverCells, a.maxLeftover))
         if !a.undersideDeviation.isEmpty { print("  Underside (side B): gouge cells \(a.undersideGougeCells)") }
         for v in StockSimulator.keepOutViolations(out.toolpaths, regions: job.regions, stockTop: ctx.stockTop, stockSize: ctx.placed.stockSize) { print("  ✖︎ \(v)") }
+        var images: [(String, TopView.Image)] = []
         if let png = pngPath {
-            let img = TopView.render(stock: sim.stock, stockSize: s, analysis: a, toolpaths: pngPaths ? out.toolpaths.filter { $0.side == .a } : [], regions: job.regions)
+            images.append((png, TopView.render(stock: sim.stock, stockSize: s, analysis: a, toolpaths: pngPaths ? out.toolpaths.filter { $0.side == .a } : [], regions: job.regions)))
+        }
+        if let png = undersidePath {
+            images.append((png, TopView.renderUnderside(grid: sim.stock, stockSize: s, analysis: a, toolpaths: out.toolpaths.filter { $0.side == .b })))
+        }
+        for (png, img) in images {
             let ppm = URL(fileURLWithPath: png).deletingPathExtension().appendingPathExtension("ppm")
             try img.ppm.write(to: ppm)
             let p = Process()
