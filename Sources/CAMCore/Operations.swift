@@ -77,8 +77,9 @@ extension CAMContext {
         let s = placed.stockSize
         let R = op.tool.radius
         let so = op.stepover
-        let target = stockTop - op.facingDepth
-        let passes = max(1, Int(ceil(op.facingDepth / max(0.05, op.cutting.stepdown))))
+        let depth = min(op.facingDepth, depthFloor(op).map { stockTop - $0 } ?? .infinity)
+        let target = stockTop - depth
+        let passes = max(1, Int(ceil(depth / max(0.05, op.cutting.stepdown))))
         var ys: [Double] = []
         var y = 0.0
         while y < s.y { ys.append(y); y += so }
@@ -532,7 +533,7 @@ extension CAMContext {
         let allowance = max(0, fin.allowance)
         let finishing = fin.enabled && allowance > 1e-6
         let zTop = stockTop
-        let zBot = max(-op.throughDepth, testCutFloor(op) ?? -.infinity)
+        let zBot = max(-op.throughDepth, depthFloor(op) ?? -.infinity)
         let roughZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.cutting.stepdown)
         let finishZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.finishStepdown)
         let anchors = tabAnchors(op, finishLoops: finishLoops)

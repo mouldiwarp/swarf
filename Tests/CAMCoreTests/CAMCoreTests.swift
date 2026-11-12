@@ -813,6 +813,13 @@ import simd
         #expect(g.contains("G1 X30 F1500"), "\(g)")
     }
 
+    @Test func materialAdjustmentIsDescribed() {
+        #expect(Material.named("mdf").adjustmentSummary == nil)
+        #expect(Material.named("hardwood").adjustmentSummary == "feed and plunge ×0.8, stepdown ×0.75")
+        let d = Material.named("hardwood").apply(CuttingData(rpm: 18000, feed: 1200, plunge: 800, stepdown: 1.5, stepoverPercent: 45))
+        #expect(d.feed == 960 && d.plunge == 640 && abs(d.stepdown - 1.125) < 0.01)
+    }
+
     @Test func rrfSpindleCommandsNameTheSpindle() {
         // RRF 3.3+ rejects a bare M3 when no tool is selected: "M3: No P parameter and no active tool with spindle".
         let a = ToolLibrary.starter.tools[0], b = ToolLibrary.starter.tools[1]
@@ -974,5 +981,91 @@ import simd
         let f = post.process([tp])[0]
         #expect(f.name == "Body_TEST.gcode")
         #expect(f.content.contains("; TEST CUT - depths limited to: cutouts 8 mm, pockets and carving 4 mm, holes 4 mm."))
+    }
+}
+
+@Suite struct MaxDepthTests {
+    let lib = ToolLibrary.starter
+
+    func deepest(_ tp: Toolpath) -> Double { tp.moves.filter { $0.kind != .rapid }.map(\.to.z).min() ?? .infinity }
+
+    /// Generates `op` with and without a maximum depth: the limited one must stop exactly there (or above it) and
+    /// the unlimited one must go deeper, so the limit is what stopped it. Returns the limited toolpath.
+    @discardableResult
+    func check(_ op: CAMCore.Operation, mesh: Mesh, job: Job = Job(), depth: Double, exact: Bool = true) throws -> (Toolpath, CAMContext) {
+        var job = job
+        job.quality = .draft
+        var limited = op
+        limited.maxDepth = depth
+        job.operations = [limited]
+        let ctx = CAMContext(raw: mesh, job: job)
+        let free = try ctx.generate(op)
+        let tp = try ctx.generate(limited)
+        let floor = ctx.stockTop - depth
+        #expect(deepest(free) < floor - 0.1, "\(op.kind): the unlimited cut should go deeper than \(depth) mm")
+        #expect(deepest(tp) >= floor - 1e-6, "\(op.kind): cut to \(ctx.stockTop - deepest(tp)) mm, limit \(depth) mm")
+        if exact { #expect(abs(deepest(tp) - floor) < 1e-6, "\(op.kind): stopped at \(ctx.stockTop - deepest(tp)) mm") }
+        return (tp, ctx)
+    }
+
+    /// 3D finishing of a faceted dome needs the same 0.15 mm allowance as the other 3D tests.
+    func noGouges(_ tp: Toolpath, _ ctx: CAMContext, tolerance: Double = 0.05) {
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.25)
+        sim.run([tp])
+        #expect(sim.analyze(model: ctx.placed, tolerance: tolerance).gougeCells == 0, "\(tp.kind) gouged")
+    }
+
+    @Test func pocketAndCutoutStopAtTheirOwnDepth() throws {
+        let flat = lib.closest(kind: .flat, diameter: 3.175)!
+        let (p, pc) = try check(CAMCore.Operation(kind: .pocket, tool: flat), mesh: OperationTests().pocketPlate(), depth: 2)
+        noGouges(p, pc)
+        let (c, cc) = try check(CAMCore.Operation(kind: .cutout, tool: lib.closest(kind: .flat, diameter: 6)!), mesh: STL.box(V3(40, 30, 20)), depth: 7)
+        noGouges(c, cc)
+    }
+
+    @Test func threeDStrategiesStopAtTheirOwnDepth() throws {
+        let dome = STL.dome(radius: 20, segments: 48, rings: 24, center: V2(25, 25))
+        let flat = lib.closest(kind: .flat, diameter: 6)!, ball = lib.closest(kind: .ball, diameter: 3)!
+        let (r, rc) = try check(CAMCore.Operation(kind: .roughing, tool: flat), mesh: dome, depth: 6, exact: false)
+        noGouges(r, rc, tolerance: 0.15)
+        let (f, fc) = try check(CAMCore.Operation(kind: .parallelFinish, tool: ball), mesh: dome, depth: 6, exact: false)
+        noGouges(f, fc, tolerance: 0.15)
+        try check(CAMCore.Operation(kind: .waterlineFinish, tool: ball), mesh: dome, depth: 6, exact: false)
+    }
+
+    @Test func drillingFacingAndVCarveStopAtTheirOwnDepth() throws {
+        var drill = CAMCore.Operation(kind: .drill, tool: lib.tools[0])
+        drill.cutting.stepdown = 1.5
+        try check(drill, mesh: DrillTests.plate(), depth: 3)
+
+        var job = Job()
+        job.stock.extraTop = 3
+        var face = CAMCore.Operation(kind: .facing, tool: lib.closest(kind: .flat, diameter: 6)!)
+        face.facingDepth = 3
+        try check(face, mesh: STL.box(V3(30, 30, 10)), job: job, depth: 1.5)
+
+        let (mesh, vjob) = VCarveTests().lJob()
+        try check(vjob.operations[0], mesh: mesh, job: vjob, depth: 0.5, exact: false)
+    }
+
+    @Test func noLimitByDefaultAndOldProjectsStillOpen() throws {
+        let op = CAMCore.Operation(kind: .pocket, tool: lib.tools[0])
+        #expect(op.maxDepth == nil)
+        var obj = try JSONSerialization.jsonObject(with: JSONEncoder().encode(op)) as! [String: Any]
+        obj.removeValue(forKey: "maxDepth")
+        let old = try JSONDecoder().decode(CAMCore.Operation.self, from: JSONSerialization.data(withJSONObject: obj))
+        #expect(old.maxDepth == nil)
+    }
+
+    @Test func theShallowerOfTestCutAndMaximumDepthWins() throws {
+        var job = TestCutTests().testJob(8, 4, 4)
+        job.quality = .draft
+        var op = CAMCore.Operation(kind: .cutout, tool: lib.closest(kind: .flat, diameter: 6)!)
+        op.maxDepth = 5
+        job.operations = [op]
+        let ctx = CAMContext(raw: STL.box(V3(40, 30, 20)), job: job)
+        #expect(abs(deepest(try ctx.generate(op)) - (ctx.stockTop - 5)) < 1e-6)
+        op.maxDepth = 12
+        #expect(abs(deepest(try ctx.generate(op)) - (ctx.stockTop - 8)) < 1e-6)
     }
 }

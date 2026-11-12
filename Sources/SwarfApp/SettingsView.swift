@@ -240,7 +240,7 @@ struct ToolEditor: View {
                 NumberField(title: "Stick-out", value: $tool.stickout, step: 1, range: 1...200)
                 NumberField(title: "Shank Ø", value: $tool.shankDiameter, step: 0.1, range: 0.5...25)
             }
-            Section("Default cutting data (MDF baseline)") {
+            Section {
                 NumberField(title: "Spindle", value: $tool.defaults.rpm, unit: "RPM", step: 500, range: 0...60000, digits: 0)
                 NumberField(title: "Feed", value: $tool.defaults.feed, unit: "mm/min", step: 50, range: 1...20000, digits: 0)
                 NumberField(title: "Plunge", value: $tool.defaults.plunge, unit: "mm/min", step: 25, range: 1...10000, digits: 0)
@@ -257,6 +257,11 @@ struct ToolEditor: View {
                         .controlSize(.small)
                     }
                 }
+            } header: {
+                Text("Default cutting data (MDF baseline)")
+            } footer: {
+                Text("These are for MDF. When an operation picks up this tool, Swarf scales them for the project's stock material (hardwood: feed and plunge ×0.8, stepdown ×0.75). Existing operations keep their own feeds until you click Reset to tool defaults.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Notes") { TextEditor(text: $tool.notes).frame(minHeight: 50) }
         }

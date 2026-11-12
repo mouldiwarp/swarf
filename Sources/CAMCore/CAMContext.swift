@@ -103,14 +103,17 @@ public final class CAMContext: @unchecked Sendable {
             let mb = placed.modelBounds.min.z
             base = op.kind == .pocket ? max(0, mb) : (mb <= 0.01 ? min(op.bottomSkin, stockTop) : mb)
         }
-        if op.kind != .cutout, op.kind != .drill, let t = testCutFloor(op) { return max(base, t) }
+        if op.kind != .cutout, op.kind != .drill, let t = depthFloor(op) { return max(base, t) }
         return base
     }
 
-    /// The lowest Z an operation may reach in test-cut mode, or nil when the mode is off or does not apply.
-    public func testCutFloor(_ op: Operation) -> Double? {
-        guard let t = job.activeTestCut, let d = t.depth(for: op.kind), d.isFinite else { return nil }
-        return stockTop - max(0, d)
+    /// The lowest Z an operation may reach: the shallower of its own maximum depth and the test-cut limit,
+    /// or nil when neither applies.
+    public func depthFloor(_ op: Operation) -> Double? {
+        var depths: [Double] = []
+        if let t = job.activeTestCut, let d = t.depth(for: op.kind), d.isFinite { depths.append(max(0, d)) }
+        if let d = op.maxDepth, d.isFinite, d > 0 { depths.append(d) }
+        return depths.min().map { stockTop - $0 }
     }
 
     /// Effective obstacle heights for an operation (model + floor + boundary + regions + stock-to-leave).
@@ -214,7 +217,7 @@ public final class CAMContext: @unchecked Sendable {
             }
         }
         for v in [op.stockToLeaveXY, op.stockToLeaveZ, op.boundaryMargin, op.bottomSkin, op.facingDepth, op.throughDepth,
-                  op.rasterAngle, op.slopeLimit, op.floorZ ?? 0, t.cornerRadius, t.vAngle, t.tipDiameter, t.fluteLength,
+                  op.rasterAngle, op.slopeLimit, op.floorZ ?? 0, op.maxDepth ?? 0, t.cornerRadius, t.vAngle, t.tipDiameter, t.fluteLength,
                   op.tabs.width, op.tabs.height, op.tabs.minLoopLength] where !v.isFinite {
             throw bad("one of the settings is not a valid number.")
         }

@@ -77,7 +77,7 @@ extension CAMContext {
         let tanHalf = tan(max(1, min(178, op.tool.vAngle)) / 2 * .pi / 180)
         let tipR = op.tool.tipDiameter / 2
         var limit = settings.maxDepth > 0 ? settings.maxDepth : .infinity
-        if let floor = testCutFloor(op) { limit = min(limit, max(0, topZ - floor)) }
+        if let floor = depthFloor(op) { limit = min(limit, max(0, topZ - floor)) }
 
         // Conservative distance to the outline. The true edge lies up to about half a cell beyond the nearest outside
         // centre; silhouette masks are also stamped conservatively (edges widened), so allow a full cell there.

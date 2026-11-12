@@ -166,7 +166,7 @@ struct StockInspector: View {
     var body: some View {
         Form {
             Section("Material") {
-                Picker("Material", selection: model.jobBinding(\.stock.materialID, name: "Material")) {
+                Picker("Material", selection: Binding(get: { model.job.stock.materialID }, set: { model.setMaterial($0) })) {
                     ForEach(Material.library) { m in Text(m.name).tag(m.id) }
                 }
                 Text("New operations take their feeds from the tool's defaults, scaled for this material.").font(.caption).foregroundStyle(.secondary)
@@ -419,7 +419,35 @@ struct OperationInspector: View {
                 let advice = FeedsAndSpeeds.check(tool: op.tool, data: op.cutting, material: .named(model.job.stock.materialID))
                 LabeledContent("Chip load", value: String(format: "%.3f mm/tooth", advice.chipLoad))
                 ForEach(advice.warnings, id: \.self) { w in Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
-                Button("Reset to tool defaults") { model.setTool(op.tool, for: id, resetCutting: true) }.controlSize(.small)
+                let material = Material.named(model.job.stock.materialID)
+                Button(material.adjustmentSummary == nil ? "Reset to tool defaults" : "Reset to tool defaults for \(material.name)") {
+                    model.setTool(op.tool, for: id, resetCutting: true)
+                }
+                .controlSize(.small)
+                if let adj = material.adjustmentSummary {
+                    Label {
+                        Text("Adjusted for \(material.name). The tool library's values are for MDF; resetting applies \(adj). Change the material under Stock to use other factors.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: { Image(systemName: "info.circle.fill").foregroundStyle(.blue) }
+                    .font(.callout)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+            Section("Depth") {
+                let thickness = model.placed?.stockTop ?? 0
+                Toggle("Limit maximum depth", isOn: Binding(get: { op.maxDepth != nil }, set: { on in
+                    // Start from how deep the operation cuts now, so turning it on changes nothing until edited.
+                    let deepest = model.toolpaths.first { $0.id == id }.map { thickness - ($0.moves.map(\.to.z).min() ?? thickness) }
+                    b(\.maxDepth).wrappedValue = on ? max(0.5, ((deepest ?? thickness) * 10).rounded() / 10) : nil
+                }))
+                if let d = op.maxDepth {
+                    NumberField(title: "Maximum depth", value: Binding(get: { d }, set: { b(\.maxDepth).wrappedValue = $0 }),
+                                unit: "mm", step: 0.5, range: 0.1...500)
+                    Text(String(format: "Measured down from the top of the stock (%.1f mm thick). Nothing in this operation cuts deeper; material below is left.", thickness))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
             kindSpecific(op)
             if op.kind != .facing && op.kind != .cutout && op.kind != .vcarve && op.kind != .drill {

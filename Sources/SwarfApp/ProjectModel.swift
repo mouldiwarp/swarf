@@ -58,6 +58,16 @@ final class ProjectModel: ObservableObject {
     @Published var showUndercuts = false
     @Published var viewRequest: ViewPreset? = nil
     @Published var errorMessage: String? = nil
+    /// A short-lived banner over the 3D view, for things the app changed on the user's behalf.
+    @Published var notice: Notice? = nil
+    private var noticeTask: Task<Void, Never>?
+
+    struct Notice: Identifiable {
+        let id = UUID()
+        var text: String
+        var actionTitle: String? = nil
+        var action: (() -> Void)? = nil
+    }
     @Published var showExport = false
     @Published var showImporter = false
     @Published var showInspector = true
@@ -296,6 +306,7 @@ final class ProjectModel: ObservableObject {
         let op = CAMCore.Operation(kind: kind, tool: tool, material: .named(job.stock.materialID))
         updateJob("Add Operation") { $0.operations.append(op) }
         selection = .operation(op.id)
+        announceScaling(tool)
     }
 
     func addFullProcessing() {
@@ -306,6 +317,10 @@ final class ProjectModel: ObservableObject {
         let ops = JobTemplates.fullProcessing(ctx, library: lib, material: .named(job.stock.materialID))
         updateJob("Full Processing") { $0.operations.append(contentsOf: ops) }
         if let f = ops.first { selection = .operation(f.id) }
+        let m = Material.named(job.stock.materialID)
+        if let adj = m.adjustmentSummary, !ops.isEmpty {
+            showNotice("Feeds and speeds for these \(ops.count) operations were adjusted for \(m.name): \(adj) of the tool library's MDF values.")
+        }
     }
 
     func duplicateOperation(_ id: UUID) {
@@ -327,15 +342,65 @@ final class ProjectModel: ObservableObject {
         updateJob("Reorder Operations") { $0.operations.move(fromOffsets: from, toOffset: to) }
     }
 
+    func showNotice(_ text: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+        notice = Notice(text: text, actionTitle: actionTitle, action: action)
+        noticeTask?.cancel()
+        // A notice with a button stays until dismissed; a plain one fades after a while.
+        guard action == nil else { return }
+        noticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            if !Task.isCancelled { self?.notice = nil }
+        }
+    }
+
+    /// Tells the user when an operation's feeds differ from the tool library because of the stock material.
+    func announceScaling(_ tool: Tool) {
+        let m = Material.named(job.stock.materialID)
+        guard m.adjustmentSummary != nil else { return }
+        let a = tool.defaults, b = m.apply(a)
+        func n(_ v: Double) -> String { String(format: "%g", v) }
+        var parts: [String] = []
+        if a.rpm != b.rpm { parts.append("spindle \(n(a.rpm)) → \(n(b.rpm)) RPM") }
+        if a.feed != b.feed { parts.append("feed \(n(a.feed)) → \(n(b.feed)) mm/min") }
+        if a.plunge != b.plunge { parts.append("plunge \(n(a.plunge)) → \(n(b.plunge)) mm/min") }
+        if a.stepdown != b.stepdown { parts.append("stepdown \(n(a.stepdown)) → \(n(b.stepdown)) mm") }
+        guard !parts.isEmpty else { return }
+        showNotice("Feeds and speeds for T\(tool.number) were adjusted for \(m.name): " + parts.joined(separator: ", ")
+                   + ". The tool library's values are for MDF.")
+    }
+
+    /// Changes the stock material. Existing operations keep their feeds, so offer to rescale them.
+    func setMaterial(_ id: String) {
+        guard id != job.stock.materialID else { return }
+        updateJob("Material") { $0.stock.materialID = id }
+        guard !job.operations.isEmpty else { return }
+        let m = Material.named(id)
+        showNotice("Stock material is now \(m.name). Existing operations keep their current feeds and speeds.",
+                   actionTitle: "Rescale All for \(m.name)") { [weak self] in self?.rescaleAllOperations() }
+    }
+
+    func rescaleAllOperations() {
+        updateJob("Rescale Feeds") { j in
+            let m = Material.named(j.stock.materialID)
+            for i in j.operations.indices { Self.resetCutting(&j.operations[i], tool: j.operations[i].tool, material: m) }
+        }
+        let m = Material.named(job.stock.materialID)
+        showNotice("Feeds and speeds for all \(job.operations.count) operations were reset from the tool library"
+                   + (m.adjustmentSummary.map { " and adjusted for \(m.name): \($0)." } ?? "."))
+    }
+
+    private static func resetCutting(_ op: inout CAMCore.Operation, tool: Tool, material: CAMCore.Material) {
+        let stepover = op.cutting.stepoverPercent
+        op.cutting = material.apply(tool.defaults)
+        if op.kind != .facing { op.cutting.stepoverPercent = op.kind == .parallelFinish ? stepover : tool.defaults.stepoverPercent }
+    }
+
     func setTool(_ tool: Tool, for id: UUID, resetCutting: Bool) {
+        if resetCutting { announceScaling(tool) }
         updateJob("Change Tool") { j in
             guard let i = j.operations.firstIndex(where: { $0.id == id }) else { return }
             j.operations[i].tool = tool
-            if resetCutting {
-                let stepover = j.operations[i].cutting.stepoverPercent
-                j.operations[i].cutting = Material.named(j.stock.materialID).apply(tool.defaults)
-                if j.operations[i].kind != .facing { j.operations[i].cutting.stepoverPercent = j.operations[i].kind == .parallelFinish ? stepover : tool.defaults.stepoverPercent }
-            }
+            if resetCutting { Self.resetCutting(&j.operations[i], tool: tool, material: .named(j.stock.materialID)) }
         }
     }
 

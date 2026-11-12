@@ -84,6 +84,9 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     public var boundaryMargin = 3.0
     /// Explicit lowest Z (stock space). nil = automatic.
     public var floorZ: Double? = nil
+    /// Deepest this operation may cut, in mm below the stock top. nil = no limit. Applies to every strategy;
+    /// material below it is left. Optional so projects saved before it existed still open.
+    public var maxDepth: Double? = nil
     /// When the model touches the stock bottom, automatic floors stop this far above it.
     public var bottomSkin = 1.0
     // Facing

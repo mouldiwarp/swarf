@@ -135,7 +135,7 @@ open build/Swarf.app</pre>
   <h2 style="margin-top:16pt">5 · Stock, material and work zero</h2>
   <p>Select <b>Stock &amp; Work Zero</b> in the sidebar.</p>
   <ul>
-    <li><b>Material:</b> MDF, plywood, softwood, hardwood, acrylic, HDPE, foam or aluminium. The material scales each tool's default speeds and feeds.</li>
+    <li><b>Material:</b> MDF, plywood, softwood, hardwood, acrylic, HDPE, foam or aluminium. The material scales each tool's default speeds and feeds (for example hardwood: feed and plunge ×0.8, stepdown ×0.75). Changing it later leaves existing operations as they are, and a banner offers to rescale them all.</li>
     <li><b>Size from model + margins</b> sizes the stock automatically: set the XY margin and any extra on top or below. Turn it off to enter your real blank: Width (X), Depth (Y) and Thickness (Z).</li>
     <li><b>Vertical</b> places the model at the top, centre or bottom of the stock. <b>Offset X / Y</b> shifts it within the blank.</li>
     <li><b>Work zero</b>: pick one of 9 points on the stock, and set <b>Z zero</b> to the stock top or the bed. Swarf's default is the <b>centre of the left edge, top of stock</b>. Toolpaths start from the work zero, so the preview, the simulation and the G-code all begin at the point you choose.</li>
@@ -189,7 +189,8 @@ open build/Swarf.app</pre>
   <h3>Settings every operation has</h3>
   <ul>
     <li><b>Tool</b> from the library, and its <b>Tool number (T)</b>.</li>
-    <li><b>Feeds &amp; speeds:</b> spindle RPM, feed, plunge, stepdown (the depth of each pass), stepover (the sideways step, as a percentage of the diameter) and ramp angle. <b>Reset to tool defaults</b> reloads them from the library.</li>
+    <li><b>Feeds &amp; speeds:</b> spindle RPM, feed, plunge, stepdown (the depth of each pass), stepover (the sideways step, as a percentage of the diameter) and ramp angle. <b>Reset to tool defaults</b> reloads them from the library. Library values are for MDF; for other materials Swarf scales them and says so in a banner over the 3D view, with the exact numbers.</li>
+    <li><b>Depth:</b> turn on <b>Limit maximum depth</b> and enter how far below the stock top this operation may cut. It works for every strategy (pockets, roughing, finishing, cutouts, holes, V-carving, facing), and material below the limit is left. In test-cut mode the shallower of the two limits wins.</li>
     <li><b>Area:</b> boundary (whole stock, model silhouette plus a margin, or inside the model only) and an optional custom bottom height.</li>
     <li><b>Stock to leave:</b> radial (XY) and axial (Z) allowances for a later finishing operation.</li>
     <li><b>Direction:</b> climb or conventional milling.</li>

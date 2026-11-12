@@ -135,6 +135,17 @@ public struct Material: Codable, Sendable, Identifiable, Equatable, Hashable {
 
     public static func named(_ id: String) -> Material { library.first { $0.id == id } ?? library[0] }
 
+    /// How this material changes a tool's MDF-baseline cutting data, e.g. "feed and plunge ×0.8, stepdown ×0.75",
+    /// or nil when it uses the tool's values as they are.
+    public var adjustmentSummary: String? {
+        func f(_ v: Double) -> String { "×" + String(format: "%g", v) }
+        var parts: [String] = []
+        if rpmFactor != 1 { parts.append("spindle " + f(rpmFactor)) }
+        if feedFactor != 1 { parts.append("feed and plunge " + f(feedFactor)) }
+        if stepdownFactor != 1 { parts.append("stepdown " + f(stepdownFactor)) }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
     public func apply(_ d: CuttingData) -> CuttingData {
         var o = d
         o.rpm = (d.rpm * rpmFactor).rounded()

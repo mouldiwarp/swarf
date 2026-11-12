@@ -29,6 +29,16 @@ struct ContentView: View {
                         .padding(20).allowsHitTesting(false)
                 }
             }
+            // An overlay, not a ZStack child, so the banner never changes the layout of the 3D view underneath.
+            .overlay(alignment: .top) {
+                if let n = model.notice {
+                    NoticeBanner(notice: n) { model.notice = nil }
+                        .padding(.top, 64)
+                        .padding(.leading, 76)  // clear of the view's tool strip on the left
+                        .padding(.trailing, 16)
+                        .id(n.id)
+                }
+            }
             .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
                 guard let p = providers.first else { return false }
                 _ = p.loadObject(ofClass: URL.self) { url, _ in
@@ -311,4 +321,30 @@ func formatDuration(_ s: Double) -> String {
     let secs = Int(min(max(s, 0), 3.6e8))
     let m = secs / 60, h = m / 60
     return h > 0 ? "\(h) h \(m % 60) min" : "\(m) min \(secs % 60) s"
+}
+
+/// Banner shown over the 3D view when Swarf changed something on the user's behalf.
+struct NoticeBanner: View {
+    let notice: ProjectModel.Notice
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill").foregroundStyle(.blue).font(.title3)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(notice.text).fixedSize(horizontal: false, vertical: true)
+                if let title = notice.actionTitle, let action = notice.action {
+                    Button(title) { action() }.buttonStyle(.borderedProminent).controlSize(.small)
+                }
+            }
+            Spacer(minLength: 0)
+            Button { dismiss() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Dismiss")
+        }
+        .padding(12)
+        .frame(maxWidth: 560)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.blue.opacity(0.5)))
+        .shadow(radius: 6, y: 2)
+    }
 }
