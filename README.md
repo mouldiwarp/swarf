@@ -34,7 +34,7 @@ post-processors for most popular hobby machines.
 - **Import and orient** a model: rotate in 90° steps, click the face that should point up or lie on
   the bed, or let Swarf lay the largest flat face down. Faces a 3-axis machine can't reach are
   highlighted.
-- **Set up the stock and work zero.** The default is the WorkBee convention: front-left corner, top of
+- **Set up the stock and work zero.** The default is the centre of the left edge, top of
   stock.
 - **Build the toolpaths.** One click on *Full Processing* analyses the model and adds the operations
   it needs, or you can add them one at a time: facing, pockets, 3D roughing and finishing, V-carving,

@@ -223,7 +223,7 @@ struct StockInspector: View {
                 }
                 NumberField(title: "Safe height", value: model.jobBinding(\.safeHeight), step: 1, range: 1...100)
             } header: { Text("Work zero (G54)") } footer: {
-                Text("WorkBee convention: zero XY on the front-left corner and probe Z on the top of the stock.").font(.caption)
+                Text("Toolpaths start from the work zero. Zero XY on the point shown and probe Z on the top of the stock.").font(.caption)
             }
             Section {
                 Picker("Calculation resolution", selection: model.jobBinding(\.quality)) {

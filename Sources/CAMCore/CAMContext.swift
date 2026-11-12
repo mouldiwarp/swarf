@@ -35,6 +35,8 @@ public final class CAMContext: @unchecked Sendable {
     public var stockTop: Double { placed.stockTop }
     public var safeZ: Double { placed.stockTop + job.safeHeight }
     public var res: Double { heights.res }
+    /// Work zero in stock space (XY). Toolpaths start here, matching where the G-code starts on the machine.
+    public var startXY: V2 { let o = placed.originPoint(job.origin); return V2(o.x, o.y) }
 
     public init(raw: Mesh, job: Job) {
         self.job = job
@@ -213,7 +215,7 @@ public final class CAMContext: @unchecked Sendable {
 
     public func generate(_ op: Operation, progress: ProgressHandler? = nil) throws -> Toolpath {
         try validate(op)
-        let start = V3(0, 0, safeZ)
+        let start = V3(startXY.x, startXY.y, safeZ)
         var tp: Toolpath
         switch op.kind {
         case .facing: tp = try facing(op, progress: progress)
@@ -257,10 +259,10 @@ public final class CAMContext: @unchecked Sendable {
 
     func makeToolpath(_ op: Operation, _ b: PathBuilder) -> Toolpath {
         Toolpath(id: op.id, name: op.name, kind: op.kind, tool: op.tool, rpm: op.cutting.rpm,
-                 start: V3(0, 0, safeZ), moves: b.moves)
+                 start: V3(startXY.x, startXY.y, safeZ), moves: b.moves)
     }
 
     func builder(_ op: Operation) -> PathBuilder {
-        PathBuilder(start: V3(0, 0, safeZ), safeZ: safeZ, feed: op.cutting.feed, plunge: op.cutting.plunge)
+        PathBuilder(start: V3(startXY.x, startXY.y, safeZ), safeZ: safeZ, feed: op.cutting.feed, plunge: op.cutting.plunge)
     }
 }

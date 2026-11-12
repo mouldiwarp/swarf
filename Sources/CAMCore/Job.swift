@@ -203,7 +203,7 @@ public struct Job: Codable, Sendable, Equatable {
     public var version = 1
     public var orientation = Orientation()
     public var stock = StockSetup()
-    public var origin = WorkOrigin.workbeeDefault
+    public var origin = WorkOrigin.swarfDefault
     public var machineID = MachineProfile.workbeeRRF.id
     public var safeHeight = 5.0
     public var quality: ResolutionQuality = .normal

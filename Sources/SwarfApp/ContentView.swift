@@ -90,7 +90,7 @@ struct ContentView: View {
                     Label("Generate", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            .help("Regenerate toolpaths (⌘G)")
+            .help("Recalculate all toolpaths from scratch (⌘G)")
             Toggle(isOn: $model.simMode.animation()) {
                 Label("Simulate", systemImage: "play.square.stack")
             }

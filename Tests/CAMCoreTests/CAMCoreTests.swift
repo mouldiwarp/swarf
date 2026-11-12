@@ -403,6 +403,27 @@ import simd
     }
 }
 
+@Suite struct WorkOriginTests {
+    @Test func newJobsDefaultToCentreLeftTop() {
+        #expect(Job().origin == WorkOrigin(x: .left, y: .center, z: .stockTop))
+    }
+
+    @Test func toolpathsStartAtTheWorkZero() throws {
+        let tool = ToolLibrary.starter.closest(kind: .flat, diameter: 6)!
+        for origin in [WorkOrigin.workbeeDefault, .swarfDefault, WorkOrigin(x: .right, y: .back)] {
+            var job = Job()
+            job.origin = origin
+            let op = Operation(kind: .cutout, tool: tool)
+            job.operations = [op]
+            let ctx = CAMContext(raw: STL.box(V3(40, 30, 10)), job: job)
+            let tp = try ctx.generate(op)
+            let o = ctx.placed.originPoint(origin)
+            #expect(abs(tp.start.x - o.x) < 1e-9 && abs(tp.start.y - o.y) < 1e-9)
+            #expect(abs(tp.tessellated().first!.0.x - o.x) < 1e-9)
+        }
+    }
+}
+
 @Suite struct DrillTests {
     /// 60 × 20 × 10 plate with three holes in 20 mm cells: Ø6 through, Ø6 blind (floor at z 5), Ø10 through.
     static func plate() -> Mesh {

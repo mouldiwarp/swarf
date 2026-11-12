@@ -109,9 +109,9 @@ extension CAMContext {
                                                warnings.first ?? ""))
         }
 
-        // Nearest-neighbour order from the origin.
+        // Nearest-neighbour order from the work zero.
         var order: [Hole] = []
-        var here = V2.zero
+        var here = startXY
         var left = holes
         while !left.isEmpty {
             let i = left.indices.min { left[$0].center.dist(here) < left[$1].center.dist(here) }!

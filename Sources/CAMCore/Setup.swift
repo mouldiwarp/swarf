@@ -17,6 +17,8 @@ public struct WorkOrigin: Codable, Sendable, Equatable, Hashable {
 
     /// WorkBee convention: front-left corner of the stock top surface.
     public static let workbeeDefault = WorkOrigin()
+    /// Swarf's default for new jobs: centre of the left edge, top of stock.
+    public static let swarfDefault = WorkOrigin(x: .left, y: .center, z: .stockTop)
 }
 
 public enum ModelZPlacement: String, Codable, Sendable, CaseIterable {

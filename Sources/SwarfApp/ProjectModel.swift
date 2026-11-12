@@ -99,6 +99,8 @@ final class ProjectModel: ObservableObject {
                     self?.diagnostics = nil
                     self?.lastPlacementKey = ""
                     self?.contextKey = ""
+                    // Toolpaths from the previous model must never be reused for the new one.
+                    self?.cache = [:]
                     self?.jobChanged()
                 }
             }
@@ -406,7 +408,10 @@ final class ProjectModel: ObservableObject {
         enc.outputFormatting = .sortedKeys
         let maxTool = j.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }.max() ?? 5
         let parts: [Data] = [(try? enc.encode(j.orientation)) ?? Data(), (try? enc.encode(j.stock)) ?? Data(),
-                             (try? enc.encode(j.regions)) ?? Data(), (try? enc.encode(j.activeTestCut)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8)]
+                             (try? enc.encode(j.origin)) ?? Data(), (try? enc.encode(j.regions)) ?? Data(), (try? enc.encode(j.activeTestCut)) ?? Data(), Data("\(j.quality)|\(j.safeHeight)|\(Int(ceil(max(8, maxTool + 4) / 4)))".utf8),
+                             // The model itself: replacing it (or undoing a replacement) changes the revision, so every
+                             // operation's cache key changes and nothing computed for the old shape survives.
+                             Data("model\(document.modelRevision)".utf8)]
         return parts.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "#")
     }
 
@@ -418,7 +423,14 @@ final class ProjectModel: ObservableObject {
         return String(decoding: (try? enc.encode(o)) ?? Data(), as: UTF8.self) + contextKey
     }
 
-    func generateNow() { scheduleGeneration(delay: 0) }
+    /// Recalculates every toolpath from scratch: discards cached toolpaths and the prepared model geometry.
+    func generateNow() {
+        cache = [:]
+        context = nil
+        contextKey = ""
+        for op in job.operations where op.enabled { status[op.id] = .pending }
+        scheduleGeneration(delay: 0)
+    }
 
     func scheduleGeneration(delay: Double) {
         task?.cancel()

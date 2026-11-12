@@ -138,7 +138,7 @@ open build/Swarf.app</pre>
     <li><b>Material:</b> MDF, plywood, softwood, hardwood, acrylic, HDPE, foam or aluminium. The material scales each tool's default speeds and feeds.</li>
     <li><b>Size from model + margins</b> sizes the stock automatically: set the XY margin and any extra on top or below. Turn it off to enter your real blank: Width (X), Depth (Y) and Thickness (Z).</li>
     <li><b>Vertical</b> places the model at the top, centre or bottom of the stock. <b>Offset X / Y</b> shifts it within the blank.</li>
-    <li><b>Work zero</b>: pick one of 9 points on the stock, and set <b>Z zero</b> to the stock top or the bed. The WorkBee convention, and Swarf's default, is the <b>front-left corner, top of stock</b>.</li>
+    <li><b>Work zero</b>: pick one of 9 points on the stock, and set <b>Z zero</b> to the stock top or the bed. Swarf's default is the <b>centre of the left edge, top of stock</b>. Toolpaths start from the work zero, so the preview, the simulation and the G-code all begin at the point you choose.</li>
     <li><b>Safe height</b> is how far above the stock the cutter travels between cuts.</li>
     <li><b>Calculation resolution</b> (draft, normal or fine) trades accuracy for speed. Use draft while you experiment and normal or fine for the real job.</li>
   </ul>
@@ -273,7 +273,7 @@ open build/Swarf.app</pre>
   <h2 style="margin-top:16pt">15 · Running the job on a WorkBee</h2>
   <ol class="steps">
     <li>Fix the stock down, keeping clamps outside the toolpaths (or covered by keep-outs).</li>
-    <li>Fit the first tool. Jog to the <b>front-left corner of the stock</b> and set X and Y zero.</li>
+    <li>Fit the first tool. Jog to the <b>work zero shown in the setup sheet</b> (by default the centre of the stock's left edge) and set X and Y zero.</li>
     <li>Probe or touch off Z on the <b>top of the stock</b>.</li>
     <li>Upload the first file in the Duet web interface. For the first run, raise Z zero 10–20 mm and air-cut the start of the job.</li>
     <li>Run the file. Stay at the machine with your hand near the emergency stop.</li>

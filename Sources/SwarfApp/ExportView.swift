@@ -253,7 +253,7 @@ struct SetupSheet: View {
                     Text("Stock").font(.headline)
                     Text(String(format: "%.1f × %.1f × %.1f mm %@", stockSize.x, stockSize.y, stockSize.z, Material.named(model.job.stock.materialID).name))
                     Text("Work zero").font(.headline).padding(.top, 6)
-                    Text("XY: \(model.job.origin.y.rawValue)-\(model.job.origin.x.rawValue) corner (red dot)")
+                    Text("XY: \(model.job.origin.y.rawValue)-\(model.job.origin.x.rawValue) of the stock (red dot)")
                     Text("Z: \(model.job.origin.z == .stockTop ? "top of stock" : "bed / stock bottom")")
                     Text(String(format: "Safe height: %.1f mm above stock", model.job.safeHeight))
                     Text("Estimated time").font(.headline).padding(.top, 6)
