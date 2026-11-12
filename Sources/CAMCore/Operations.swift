@@ -223,7 +223,15 @@ extension CAMContext {
             while Double(k) * so < maxD { offs.append(Float(Double(k) * so)); k += 1 }
             if !offs.isEmpty {
                 for (ki, ls) in Contours.isolines(D, levels: offs).enumerated() {
-                    for l in ls { loopsByK.append((ki + 1, l)) }
+                    for l in ls {
+                        // The distance field wobbles like the wall contour does, so the inner loops would come out as
+                        // thousands of tiny direction changes that make the machine brake and accelerate constantly
+                        // (the same problem the cutout had). Where the nearest constraint is the model wall, the loop is
+                        // an exact offset of it: put it there. Points limited by something else (a boundary, a keep-out)
+                        // are too far from that offset and keep their grid position.
+                        let exact = fp?.refine(l, level: wallOffset + Double(offs[ki]), maxShift: 2 * T.res) { wallAllowed($0, z) && T.sample($0) <= zf } ?? l
+                        loopsByK.append((ki + 1, exact))
+                    }
                 }
             }
             var comps: [Int32: [(Int, Loop)]] = [:]

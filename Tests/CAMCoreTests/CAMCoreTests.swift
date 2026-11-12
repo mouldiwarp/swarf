@@ -175,6 +175,69 @@ import simd
         #expect(sim.analyze(model: ctx.placed).gougeCells == 0)
     }
 
+    /// Base plate with a ring wall standing on it: a round cavity of radius `inner`, centred at (30, 30).
+    static func roundCavity(inner: Double = 18, outer: Double = 26, height: Double = 12, segments: Int = 96) -> Mesh {
+        var tris: [Triangle] = []
+        let c = V2(30, 30), z0: Float = 3, z1 = Float(3 + height)
+        func p(_ r: Double, _ i: Int, _ z: Float) -> SIMD3<Float> {
+            let a = Double(i) / Double(segments) * 2 * .pi
+            return SIMD3(Float(c.x + r * cos(a)), Float(c.y + r * sin(a)), z)
+        }
+        for i in 0..<segments {
+            let j = i + 1
+            tris += [Triangle(p(inner, i, z1), p(outer, i, z1), p(outer, j, z1)), Triangle(p(inner, i, z1), p(outer, j, z1), p(inner, j, z1))]
+            tris += [Triangle(p(inner, i, z0), p(inner, i, z1), p(inner, j, z1)), Triangle(p(inner, i, z0), p(inner, j, z1), p(inner, j, z0))]
+            tris += [Triangle(p(outer, i, z0), p(outer, j, z1), p(outer, i, z1)), Triangle(p(outer, i, z0), p(outer, j, z0), p(outer, j, z1))]
+        }
+        return STL.merge([STL.box(V3(60, 60, 3)), Mesh(triangles: tris)])
+    }
+
+    @Test func pocketPassesFollowCurvesSmoothly() throws {
+        // Every concentric pass in a round cavity should be a smooth curve. Passes traced from the grid wobble: their
+        // turning direction flips back and forth, which makes the machine brake and accelerate at every segment.
+        var job = Job()
+        job.quality = .draft
+        job.stock.marginXY = 5.137
+        let tool = lib.closest(kind: .flat, diameter: 6)!
+        var op = Operation(kind: .pocket, tool: tool, material: material())
+        op.boundary = .insideSilhouette
+        job.operations = [op]
+        let ctx = CAMContext(raw: Self.roundCavity(), job: job)
+        let tp = try ctx.generate(op)
+        // Look inside the cavity only (the job also clears the moat around the ring, whose loops have real corners),
+        // and only along passes: the short step-in links between concentric passes are real corners too.
+        let centre = ctx.placed.modelBounds.min.xy + V2(30, 30)
+        var turns = 0, flips = 0, flatMoves = 0
+        var prev = tp.start, prevDir: Double? = nil, prevTurn = 0.0
+        for m in tp.moves {
+            defer { prev = m.to }
+            let d = m.to.xy - prev.xy
+            guard m.kind == .feed, m.to.z < ctx.stockTop - 0.5, abs(m.to.z - prev.z) < 1e-6, simd_length(d) > 1e-6,
+                  simd_length(m.to.xy - centre) < 18, abs(simd_length(m.to.xy - centre) - simd_length(prev.xy - centre)) < 0.5 else {
+                prevDir = nil; prevTurn = 0; continue
+            }
+            flatMoves += 1
+            let a = atan2(d.y, d.x)
+            if let pd = prevDir {
+                var t = a - pd
+                while t > .pi { t -= 2 * .pi }
+                while t < -.pi { t += 2 * .pi }
+                if abs(t) > .pi / 180 {
+                    turns += 1
+                    if prevTurn != 0, (t > 0) != (prevTurn > 0) { flips += 1 }
+                    prevTurn = t
+                }
+            }
+            prevDir = a
+        }
+        #expect(flatMoves > 50)
+        #expect(Double(flips) < Double(turns) * 0.05, "\(flips) of \(turns) turns reverse direction")
+        var sim = StockSimulator(stockSize: ctx.placed.stockSize, resolution: 0.1)
+        sim.run([tp])
+        let a = sim.analyze(model: ctx.placed)
+        #expect(a.gougeCells == 0)
+    }
+
     @Test func cutoutHasTabsAtHeight() async throws {
         var job = Job()
         job.quality = .draft

@@ -21,9 +21,10 @@ Two-sided (flip) machining is in: dowel holes, side A, a roll about X, then side
 
 ## Accuracy
 
-- **Exact walls for the remaining operations.** Cutout outlines, the wall pass of flat-end-mill pockets and
+- **Exact walls for the remaining operations.** Cutout outlines, every pass of flat-end-mill pockets and
   drill-hole centres are moved onto the true model geometry with `Footprint` (Silhouette.swift). Everything else
-  still follows grid contours and can be a few tenths of a mm off on walls:
+  still follows grid contours. Walls can be a few tenths of a mm off, and curved passes wobble from segment to segment
+  (jerky motion on the machine):
   - pockets cut with a ball or V-bit tool
   - roughing (3D clearing)
   - waterline

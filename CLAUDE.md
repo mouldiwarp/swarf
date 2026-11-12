@@ -53,7 +53,9 @@ Three targets share one engine:
    Grid contours are only accurate to about a cell, and on tall walls the error changes with depth. Wherever exact
    size matters, contour points are moved onto the true geometry with `Footprint` (Silhouette.swift). It gives
    the exact XY distance to the projected mesh, optionally only for material above a Z (`minZ`). It is used for
-   cutout outlines, the wall pass of flat-end-mill pockets, and hole centres and diameters in Drill.swift.
+   cutout outlines, every pass of flat-end-mill pockets (the wall pass at the tool radius, inner passes at radius +
+   k × stepover), and hole centres and diameters in Drill.swift. Without it, curves come out as thousands of tiny
+   segments whose direction wobbles, and the machine brakes and accelerates at every one.
    `refine` caps each move at two cells and takes an `accept` check (keep-outs, boundary). Anything new that
    produces finished walls should use it too, or parts come out a few tenths undersize.
 6. `CAMContext.generate(op)` is the single entry point: it validates settings, dispatches by
