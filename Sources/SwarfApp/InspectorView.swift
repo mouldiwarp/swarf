@@ -371,6 +371,7 @@ struct RegionInspector: View {
 struct OperationInspector: View {
     @ObservedObject var model: ProjectModel
     @ObservedObject var tools = ToolLibraryStore.shared
+    @Environment(\.openSettings) private var openSettings
     let id: UUID
 
     func b<T>(_ kp: WritableKeyPath<CAMCore.Operation, T>) -> Binding<T> {
@@ -396,6 +397,13 @@ struct OperationInspector: View {
                 LabeledContent("Geometry", value: String(format: "Ø%.3g mm %@, %d flute%@, %.0f mm flutes", op.tool.diameter,
                                                           op.tool.kind.displayName, op.tool.flutes, op.tool.flutes == 1 ? "" : "s", op.tool.fluteLength))
                 IntField(title: "Tool number (T)", value: b(\.tool.number), range: 1...99)
+                Button {
+                    UserDefaults.standard.set(1, forKey: "settingsTab")
+                    openSettings()
+                } label: {
+                    Label("Edit Tool Library…", systemImage: "wrench.and.screwdriver")
+                }
+                .help("Add, edit or import tools (⇧⌘T)")
             }
             Section("Feeds & speeds") {
                 NumberField(title: "Spindle", value: b(\.cutting.rpm), unit: "RPM", step: 500, range: 0...60000, digits: 0)

@@ -109,7 +109,7 @@ also set climb or conventional cutting, stock to leave, and which keep-out regio
 
 ## Tool library
 
-Open **Swarf ▸ Settings ▸ Tool Library** to add, edit, duplicate or delete tools. Flat, ball nose,
+Click **Edit Tool Library…** in an operation's Tool section (or press ⇧⌘T, or open **Swarf ▸ Settings ▸ Tool Library**) to add, edit, duplicate or delete tools. Flat, ball nose,
 bull nose, V-bit and drill tools are supported. Each tool stores its diameter, flute length,
 stick-out and default cutting data, and Swarf shows the chip load with warnings when values look
 risky. The library is saved in `~/Library/Application Support/Swarf/tools.json`. You can import
