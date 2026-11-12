@@ -22,10 +22,18 @@ public enum MachiningSide: String, Codable, Sendable, CaseIterable {
 /// re-probed. In stock space side B sees (x, y, z) → (x, W − y, T − z).
 public struct FlipSetup: Codable, Sendable, Equatable, Hashable {
     public var enabled = false
-    /// How far the dowel holes go into the spoilboard below the stock (mm).
+    public init() {}
+}
+
+/// Settings of a dowel-hole operation.
+public struct DowelSettings: Codable, Sendable, Equatable, Hashable {
+    /// How far the holes go into the spoilboard below the stock (mm).
     public var spoilboardDepth = 5.0
-    /// Extra clearance (mm) between a dowel hole and the cutout slot around the part.
+    /// Extra clearance (mm) between a hole and the cutout slot around the part.
     public var clearance = 3.0
+    /// Hand-picked hole positions (stock space). Each also gets a hole at its mirror across the stock's Y centre line,
+    /// so the pair lands on itself when the stock is rolled over. Empty = automatic.
+    public var picks: [V2] = []
     public init() {}
 }
 
@@ -150,21 +158,68 @@ extension CAMContext {
 
     // MARK: Dowel holes
 
-    /// Dowel hole centres (stock space, identical on both sides): on the stock's Y centre line, one in the waste
-    /// beyond each end of the part. Throws with the room needed when the stock is too short.
-    public func dowelPositions(toolDiameter D: Double) throws -> [V2] {
-        guard side == .a else { throw CAMError.invalidSettings("Dowel holes are drilled before side A.") }
-        let flip = job.flipSettings
-        let s = placed.stockSize
-        let yc = s.y / 2
-        let slot = sideACutouts(job.operations).map { c -> Double in
+    /// Where `p` lands when the stock is rolled about X: mirrored across the stock's Y centre line.
+    public func mirroredAcrossX(_ p: V2) -> V2 { V2(p.x, placed.stockSize.y - p.y) }
+
+    /// Clearances a dowel hole needs: from the part's outline, and from the stock edges.
+    func dowelNeeds(_ op: Operation, cutouts: [Operation]) -> (fromPart: Double, fromEdge: Double) {
+        let slot = sideACutouts(cutouts).map { c -> Double in
             let fin = c.cutoutFinishSettings
             return c.tool.diameter + max(0, c.stockToLeaveXY) + (fin.enabled ? max(0, fin.allowance) : 0)
         }.max() ?? 6.5
-        let r = D / 2
-        let fromPart = r + slot + max(0, flip.clearance)
-        let fromEnd = r + 2
-        // Where the part crosses the centre line (the silhouette distance is exact enough here: we only need room).
+        let r = op.tool.diameter / 2
+        return (r + slot + max(0, op.dowelSettings.clearance), r + 2)
+    }
+
+    /// Why a dowel hole at `p` can't be drilled, or nil when it can. `cutouts` defaults to the job's operations.
+    public func dowelProblem(at p: V2, op: Operation, cutouts: [Operation]? = nil) -> String? {
+        let need = dowelNeeds(op, cutouts: cutouts ?? job.operations)
+        let s = placed.stockSize
+        let toEdge = min(p.x, p.y, s.x - p.x, s.y - p.y)
+        if toEdge < need.fromEdge - 1e-6 {
+            return toEdge < 0 ? "outside the stock" : String(format: "%.1f mm from the stock edge (needs %.1f mm)", max(0, toEdge), need.fromEdge)
+        }
+        let toPart = Double(silhouetteDistance.nearest(p))
+        if toPart <= 0 { return "inside the part" }
+        if toPart < need.fromPart - 1e-6 {
+            return String(format: "%.1f mm from the part (needs %.1f mm, to stay clear of the cutout)", toPart, need.fromPart)
+        }
+        return nil
+    }
+
+    /// The holes for a set of picks: each pick and its mirror, without duplicates (a pick on the centre line is
+    /// its own mirror).
+    public func dowelHoles(picks: [V2]) -> [V2] {
+        var out: [V2] = []
+        for p in picks {
+            for q in [p, mirroredAcrossX(p)] where !out.contains(where: { $0.dist(q) < 1 }) { out.append(q) }
+        }
+        return out
+    }
+
+    /// Dowel hole centres (stock space). Every hole lands on a hole when the stock is rolled about X.
+    ///
+    /// Hand-picked positions are used as they are, each with its mirror. Otherwise Swarf tries one hole on the
+    /// centre line beyond each end of the part, and failing that the mirrored pair with the most room around it
+    /// (for a guitar body, usually either side of the waist). Throws when there is no room or a pick is unusable.
+    public func dowelPositions(_ op: Operation) throws -> [V2] {
+        guard side == .a else { throw CAMError.invalidSettings("Dowel holes are drilled before side A.") }
+        let picks = op.dowelSettings.picks
+        if !picks.isEmpty {
+            let holes = dowelHoles(picks: picks)
+            for (i, h) in holes.enumerated() {
+                if let why = dowelProblem(at: h, op: op) {
+                    throw CAMError.nothingToCut(String(format: "Dowel hole %d at X%.1f Y%.1f is %@. Move it or remove it.", i + 1, h.x, h.y, why))
+                }
+            }
+            guard holes.count >= 2 else {
+                throw CAMError.nothingToCut("One dowel hole isn't enough to locate the stock. Pick a spot off the centre line (it gets a mirrored partner), or add another.")
+            }
+            return holes
+        }
+        let s = placed.stockSize
+        let yc = s.y / 2
+        // Ends of the part on the centre line.
         let sil = silhouetteDistance
         var lo = Double.infinity, hi = -Double.infinity
         let cy = Int(sil.cellCoord(V2(0, yc)).y.rounded())
@@ -175,28 +230,39 @@ extension CAMContext {
             }
         }
         if !lo.isFinite { lo = placed.modelBounds.min.x; hi = placed.modelBounds.max.x }
-        var out: [V2] = []
-        for (end, gap) in [("left", (0.0, lo)), ("right", (hi, s.x))] {
-            let x = (gap.0 + gap.1) / 2
-            let p = V2(x, yc)
-            let toPart = Double(sil.nearest(p))
-            let toEnd = min(x, s.x - x)
-            guard toPart >= fromPart - 1e-6, toEnd >= fromEnd - 1e-6 else {
-                let need = 2 * fromPart
-                throw CAMError.nothingToCut(String(format: "No room for a dowel hole at the %@ end: it needs about %.0f mm of stock between the part and the stock end on the centre line, and there is %.0f mm. Increase the stock margin or the stock length.",
-                                                   end, need, max(0, gap.1 - gap.0)))
+        let ends = [V2(lo / 2, yc), V2((hi + s.x) / 2, yc)]
+        if ends.allSatisfy({ dowelProblem(at: $0, op: op) == nil }) { return ends }
+        // Best mirrored pair: the spot (front half) whose hole and mirror sit furthest from both the part and the stock
+        // edge, i.e. in the middle of the widest stretch of waste.
+        let need = dowelNeeds(op, cutouts: job.operations)
+        var best: (V2, Double)? = nil
+        let step = max(1, res)
+        var y = need.fromEdge
+        while y <= yc - op.tool.diameter {
+            var x = need.fromEdge
+            while x <= s.x - need.fromEdge {
+                let p = V2(x, y), m = mirroredAcrossX(p)
+                let toPart = min(Double(sil.nearest(p)), Double(sil.nearest(m)))
+                let toEdge = min(x, y, s.x - x)
+                let room = min(toPart - need.fromPart, toEdge - need.fromEdge)
+                if room >= 0, room > (best?.1 ?? -1) { best = (p, room) }
+                x += step
             }
-            out.append(p)
+            y += step
         }
-        return out
+        if let (p, _) = best, dowelProblem(at: p, op: op) == nil, dowelProblem(at: mirroredAcrossX(p), op: op) == nil {
+            return [p, mirroredAcrossX(p)]
+        }
+        throw CAMError.nothingToCut(String(format: "No room for dowel holes: each needs %.0f mm of stock clear of the part, and %.0f mm from the stock edge. Increase the stock margin, or place them by hand.",
+                                           need.fromPart, need.fromEdge))
     }
 
     func dowelHoles(_ op: Operation, progress: ProgressHandler?) throws -> Toolpath {
         guard op.tool.kind == .flat || op.tool.kind == .drill else {
             throw CAMError.invalidSettings("\(op.name): use a flat end mill or a drill for dowel holes.")
         }
-        let centres = try dowelPositions(toolDiameter: op.tool.diameter)
-        let spoil = max(0, job.flipSettings.spoilboardDepth)
+        let centres = try dowelPositions(op)
+        let spoil = max(0, op.dowelSettings.spoilboardDepth)
         var bottom = -spoil
         if op.tool.kind == .drill {
             bottom -= max(0, op.tool.radius - op.tool.tipDiameter / 2) / tan(max(1, op.tool.vAngle / 2) * .pi / 180)
@@ -212,8 +278,8 @@ extension CAMContext {
         peckHoles(centres.map { ($0, bottom) }, op: op, b: &b, progress: progress)
         var tp = makeToolpath(op, b)
         if depth > op.tool.fluteLength - 3 {
-            tp.warnings.append(String(format: "Holes are %.1f mm deep, within %.1f mm of the %.1f mm flute length. Set the cutter's stick-out so the collet stays clear of the stock.",
-                                      depth, op.tool.fluteLength - depth, op.tool.fluteLength))
+            tp.warnings.append(String(format: "Holes are %.1f mm deep: the %.1f mm flutes have only %.1f mm to spare. Set the cutter's stick-out so the collet stays clear of the stock.",
+                                      depth, op.tool.fluteLength, max(0, op.tool.fluteLength - depth)))
         }
         return tp
     }

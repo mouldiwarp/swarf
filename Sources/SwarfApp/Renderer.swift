@@ -119,6 +119,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     var pathDrawLimit: Int? = nil  // number of vertices to draw (simulation playback)
     private var pathSegmentToVertex: [Int] = []
     private var overlayLineBuf: MTLBuffer?, overlayLineCount = 0  // rubber band, tool marker
+    private var dowelLineBuf: MTLBuffer?, dowelLineCount = 0  // dowel holes: green = usable, red = not
     private var heightTex: MTLTexture?, devTex: MTLTexture?
     /// Underside of the simulated stock after side-B cuts (nil for one-sided jobs).
     private var bottomTex: MTLTexture?, bottomDevTex: MTLTexture?
@@ -312,6 +313,27 @@ final class Renderer: NSObject, MTKViewDelegate {
         pathDrawLimit = pathSegmentToVertex[min(max(0, s), pathSegmentToVertex.count - 1)]
     }
 
+    func setDowels(_ holes: [(V2, Bool)], radius: Double, stockTop: Double) {
+        var l: [LineVertex] = []
+        let n = 32
+        for (p, ok) in holes {
+            let c: SIMD4<Float> = ok ? SIMD4(0.3, 1, 0.45, 1) : SIMD4(1, 0.25, 0.25, 1)
+            let ctr = SIMD3<Float>(Float(p.x), Float(p.y), Float(stockTop) + 0.1)
+            for r in [Float(radius), Float(radius) + 2] {
+                for i in 0..<n {
+                    let a0 = Float(i) / Float(n) * 2 * .pi, a1 = Float(i + 1) / Float(n) * 2 * .pi
+                    l.append(LineVertex(pos: ctr + SIMD3(r * cos(a0), r * sin(a0), 0), color: c))
+                    l.append(LineVertex(pos: ctr + SIMD3(r * cos(a1), r * sin(a1), 0), color: c))
+                }
+            }
+            let k = Float(radius) + 4
+            l.append(LineVertex(pos: ctr + SIMD3(-k, 0, 0), color: c)); l.append(LineVertex(pos: ctr + SIMD3(k, 0, 0), color: c))
+            l.append(LineVertex(pos: ctr + SIMD3(0, -k, 0), color: c)); l.append(LineVertex(pos: ctr + SIMD3(0, k, 0), color: c))
+            l.append(LineVertex(pos: ctr, color: c)); l.append(LineVertex(pos: SIMD3(ctr.x, ctr.y, 0), color: c))
+        }
+        dowelLineBuf = l.isEmpty ? nil : buffer(l); dowelLineCount = l.count
+    }
+
     func setOverlay(rect: (V2, V2)?, z: Double, tool: (V3, Tool)?) {
         var l: [LineVertex] = []
         if let (a, b) = rect {
@@ -458,6 +480,12 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(depthOff)
             enc.setVertexBuffer(b, offset: 0, index: 0)
             enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: overlayLineCount)
+        }
+        if let b = dowelLineBuf, dowelLineCount > 0 {
+            enc.setRenderPipelineState(lineBlendPipe)
+            enc.setDepthStencilState(depthOff)
+            enc.setVertexBuffer(b, offset: 0, index: 0)
+            enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: dowelLineCount)
         }
         enc.endEncoding()
         cb.present(drawable)

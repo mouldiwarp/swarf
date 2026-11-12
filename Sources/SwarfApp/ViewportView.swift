@@ -138,6 +138,8 @@ final class ViewportMTKView: MTKView {
             if !didDrag, let t = pickTriangle(e) { model.pickFace(triangle: t, up: model.mode == .faceUp) }
         case .placeTab:
             if !didDrag, let p = planeHit(e, z: (model.selectedOperation?.tabs.height ?? 0) / 2) { model.addTab(at: p) }
+        case .placeDowel:
+            if !didDrag, let top = model.placed?.stockTop, let p = planeHit(e, z: top) { model.clickDowel(at: p) }
         case .orbit:
             guard !didDrag, !model.simMode else { break }
             if let r = pickRegion(e) {
@@ -149,6 +151,11 @@ final class ViewportMTKView: MTKView {
     }
 
     override func mouseMoved(with e: NSEvent) {
+        if let model, model.mode == .placeDowel, let top = model.placed?.stockTop {
+            model.dowelHover = planeHit(e, z: top)
+            return
+        }
+        if let model, model.dowelHover != nil { model.dowelHover = nil }
         guard let model, model.mode == .faceUp || model.mode == .faceDown, let placed = model.placed else {
             if lastHoverTri != nil { lastHoverTri = nil; self.model?.highlightTriangles = [] }
             return
@@ -232,6 +239,7 @@ struct ViewportView: NSViewRepresentable {
     final class Coordinator {
         var renderer: Renderer?
         var meshVersion = -1, pathVersion = -1, simVersion = -1
+        var dowelKey = ""
         var pathKey = ""
         var regionKey = ""
         var stockKey = ""
@@ -317,7 +325,14 @@ struct ViewportView: NSViewRepresentable {
             applyView(vr, r)
             DispatchQueue.main.async { model.viewRequest = nil }
         }
-        if model.mode == .drawKeepOut || model.mode == .placeTab {
+        let dk = "\(model.toolpathVersion)|\(String(describing: model.dowelOperation?.dowel))|\(model.job.activeFlip != nil)|\(model.mode == .placeDowel ? String(describing: model.dowelHover) : "")|\(model.placed?.stockTop ?? 0)"
+        if dk != c.dowelKey {
+            c.dowelKey = dk
+            var marks = model.dowelMarkers()
+            if model.mode == .placeDowel, let h = model.dowelHover { marks += model.dowelPreview(at: h).map { ($0.0, $0.1 == nil) } }
+            r.setDowels(marks, radius: (model.dowelOperation?.tool.radius ?? 3), stockTop: model.placed?.stockTop ?? 0)
+        }
+        if model.mode == .drawKeepOut || model.mode == .placeTab || model.mode == .placeDowel {
             if !r.camera.ortho || r.camera.pitch < 1.57 { applyView(.top, r) }
         }
         v.needsDisplay = true

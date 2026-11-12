@@ -82,7 +82,58 @@ import simd
         let all = ops()
         let ctx = context(all, job: job(margin: 5))
         #expect(throws: CAMError.self) { try ctx.generate(all[0]) }
-        do { _ = try ctx.generate(all[0]) } catch { #expect(error.localizedDescription.contains("No room for a dowel hole")) }
+        do { _ = try ctx.generate(all[0]) } catch { #expect(error.localizedDescription.contains("No room for dowel holes")) }
+    }
+
+    /// Stock that is tight at the ends (5 mm) but roomy front and back (30 mm), like a guitar body's waist.
+    func tightEnds() -> Job {
+        var j = job()
+        j.stock.autoSize = false
+        j.stock.size = V3(90, 100, 20)
+        return j
+    }
+
+    func holes(_ tp: Toolpath) -> [V2] {
+        var out: [V2] = []
+        for m in tp.moves where m.kind != .rapid && !out.contains(where: { $0.dist(m.to.xy) < 0.01 }) { out.append(m.to.xy) }
+        return out
+    }
+
+    @Test func automaticDowelsFallBackToAMirroredPair() throws {
+        let all = ops()
+        let ctx = context(all, job: tightEnds())
+        let h = holes(try ctx.generate(all[0]))
+        #expect(h.count == 2)
+        let W = ctx.placed.stockSize.y
+        // Same X, mirrored in Y: each lands on the other after the roll.
+        #expect(abs(h[0].x - h[1].x) < 1e-9)
+        #expect(abs(h[0].y + h[1].y - W) < 1e-9)
+        for p in h { #expect(ctx.dowelProblem(at: p, op: all[0]) == nil) }
+    }
+
+    @Test func handPlacedDowelsGetMirroredPartners() throws {
+        var all = ops()
+        let probe = context(all, job: tightEnds())
+        let mb = probe.placed.modelBounds
+        // In the waste in front of the part, 15 mm clear of it.
+        let pick = V2(mb.min.x + 20, mb.min.y - 15)
+        all[0].dowelSettings.picks = [pick]
+        let ctx = context(all, job: tightEnds())
+        let h = holes(try ctx.generate(all[0]))
+        #expect(h.count == 2)
+        #expect(h.contains { $0.dist(pick) < 1e-9 })
+        #expect(h.contains { $0.dist(ctx.mirroredAcrossX(pick)) < 1e-9 })
+        // A pick on the part, or one whose mirror would be too close to it, is refused with the reason.
+        #expect(ctx.dowelProblem(at: mb.center.xy, op: all[0]) == "inside the part")
+        #expect(ctx.dowelProblem(at: V2(pick.x, mb.min.y - 4), op: all[0])?.contains("from the part") == true)
+        all[0].dowelSettings.picks = [V2(pick.x, mb.min.y - 4)]
+        do {
+            _ = try context(all, job: tightEnds()).generate(all[0])
+            Issue.record("expected the pick to be refused")
+        } catch { #expect(error.localizedDescription.contains("from the part")) }
+        // One hole on the centre line can't locate the stock on its own.
+        all[0].dowelSettings.picks = [V2(probe.placed.stockSize.x - 2.5, probe.placed.stockSize.y / 2)]
+        #expect(throws: CAMError.self) { try context(all, job: tightEnds()).generate(all[0]) }
     }
 
     @Test func dowelDepthIsLimitedByTheCutter() throws {
@@ -95,11 +146,11 @@ import simd
         } catch { #expect(error.localizedDescription.contains("only cuts 50")) }
         // 44 + 5 fits, with a warning that it is close.
         let near = try context(all, mesh: body(height: 44)).generate(all[0])
-        #expect(near.warnings.contains { $0.contains("flute length") })
+        #expect(near.warnings.contains { $0.contains("to spare") })
         // Less spoilboard depth makes 48 mm stock fit.
-        var j = job()
-        j.flipSettings.spoilboardDepth = 2
-        #expect(throws: Never.self) { try context(all, job: j, mesh: body(height: 48)).generate(all[0]) }
+        var shallow = all
+        shallow[0].dowelSettings.spoilboardDepth = 2
+        #expect(throws: Never.self) { try context(shallow, mesh: body(height: 48)).generate(shallow[0]) }
     }
 
     @Test func sideBMachinesTheUndersideCavity() throws {

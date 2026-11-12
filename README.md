@@ -106,7 +106,7 @@ The [user guide](docs/Swarf-User-Guide.pdf) covers each step in detail.
 | V-Carve | Engraves text and logos with a V-bit. Corners stay sharp and the depth follows the stroke width. Optional flat-bottom depth limit |
 | Drill (Peck) | Finds round holes that match the tool diameter and pecks them, with a full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Output is plain G0/G1, so it runs on any firmware |
 | Cutout (Profile) | Cuts the part free, internal holes first, with **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes off the last skin at a deeper cut (4× the roughing stepdown by default) for a clean edge |
-| Dowel Holes (Flip) | Two-sided jobs: two holes on the stock's centre line beyond each end of the part, through the stock and 5 mm into the spoilboard, for registration dowels |
+| Dowel Holes (Flip) | Two-sided jobs: registration holes through the stock and 5 mm into the spoilboard, in pairs mirrored across the stock's centre line. Placed automatically (beyond each end of the part, or either side of a waist) or by clicking, with a green/red preview |
 
 In a two-sided job, pockets, 3D roughing and finishing, and drilling can also be set to machine **side B**
 (the back). Side B is never cut out, faced or engraved: the part is cut out from side A, and side B

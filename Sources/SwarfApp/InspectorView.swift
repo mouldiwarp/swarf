@@ -209,16 +209,12 @@ struct StockInspector: View {
             Section {
                 Toggle("Machine both sides (flip)", isOn: Binding(get: { model.job.activeFlip != nil }, set: { model.setFlip($0) }))
                 if model.job.activeFlip != nil {
-                    NumberField(title: "Dowel holes into spoilboard", value: model.jobBinding(\.flipSettings.spoilboardDepth, name: "Spoilboard Depth"),
-                                unit: "mm", step: 0.5, range: 0...30)
-                    NumberField(title: "Dowel clearance from part", value: model.jobBinding(\.flipSettings.clearance, name: "Dowel Clearance"),
-                                unit: "mm", step: 0.5, range: 0...100)
                     if !model.job.operations.contains(where: { $0.kind == .dowelHoles }) {
                         Button("Add Dowel Holes") { model.addOperation(.dowelHoles) }
                     }
                 }
             } header: { Text("Two-sided machining") } footer: {
-                Text("Dowel holes go through the stock on its centre line, beyond each end of the part. Side A (the top) is machined and cut out with tabs; then the stock is rolled over front-to-back onto dowels in those holes and side B (the back) is machined. Keep the X/Y zero; re-probe Z. The stock needs room for the holes at both ends.")
+                Text("Dowel holes go through the stock in the waste around the part, in pairs mirrored across the centre line; select the Dowel holes operation to place them. Side A (the top) is machined and cut out with tabs; then the stock is rolled over front-to-back onto dowels in those holes and side B (the back) is machined. Keep the X/Y zero; re-probe Z. The stock needs room for the holes at both ends.")
                     .font(.caption)
             }
             Section("Model position in stock") {
@@ -593,19 +589,35 @@ struct OperationInspector: View {
                     ForEach(PeckRetract.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                NumberField(title: "Into spoilboard", value: model.jobBinding(\.flipSettings.spoilboardDepth, name: "Spoilboard Depth"),
-                            unit: "mm", step: 0.5, range: 0...30)
-                NumberField(title: "Clearance from part", value: model.jobBinding(\.flipSettings.clearance, name: "Dowel Clearance"),
-                            unit: "mm", step: 0.5, range: 0...100)
+                NumberField(title: "Into spoilboard", value: b(\.dowelSettings.spoilboardDepth), unit: "mm", step: 0.5, range: 0...30)
+                NumberField(title: "Clearance from part", value: b(\.dowelSettings.clearance), unit: "mm", step: 0.5, range: 0...100)
                 let thick = model.placed?.stockTop ?? 0
-                let depth = thick + model.job.flipSettings.spoilboardDepth
-                LabeledContent("Hole depth", value: String(format: "%.1f mm (%.1f stock + %.1f)", depth, thick, model.job.flipSettings.spoilboardDepth))
+                let depth = thick + op.dowelSettings.spoilboardDepth
+                LabeledContent("Hole depth", value: String(format: "%.1f mm (%.1f stock + %.1f)", depth, thick, op.dowelSettings.spoilboardDepth))
                 if depth > op.tool.fluteLength {
                     Label(String(format: "Deeper than the %.0f mm the cutter can reach. Use thinner stock, a longer cutter or less spoilboard depth.", op.tool.fluteLength),
                           systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                 }
-                Text(String(format: "Two Ø%.3g mm holes on the stock's centre line, one in the waste beyond each end of the part, pecked through the stock and into the spoilboard. After side A, put Ø%.3g mm dowels in the spoilboard holes, roll the stock over front-to-back onto them and re-probe Z.",
+                Text(String(format: "Ø%.3g mm holes pecked through the stock and into the spoilboard. After side A, put Ø%.3g mm dowels in the spoilboard holes, roll the stock over front-to-back onto them and re-probe Z.",
                             op.tool.diameter, op.tool.diameter))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Hole positions") {
+                let picks = op.dowelSettings.picks
+                LabeledContent("Placement", value: picks.isEmpty ? "Automatic" : "\(picks.count) placed by hand")
+                HStack {
+                    Button {
+                        model.mode = model.mode == .placeDowel ? .orbit : .placeDowel
+                    } label: {
+                        Label(model.mode == .placeDowel ? "Done Placing" : "Place by Clicking", systemImage: "circle.circle")
+                    }
+                    if !picks.isEmpty { Button("Use Automatic") { model.clearDowelPicks() } }
+                }
+                ForEach(Array(model.dowelMarkers().enumerated()), id: \.offset) { i, m in
+                    Label(String(format: "Hole %d: X%.1f Y%.1f", i + 1, m.0.x, m.0.y), systemImage: m.1 ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(m.1 ? .green : .red)
+                }
+                Text("Each hole you click gets a partner mirrored across the stock's centre line (front to back), so the pair lines up again after the stock is rolled over. Green spots are clear of the part and the cutout; red ones aren't and can't be used. Click a hole again to remove it. With none placed, Swarf puts one beyond each end of the part, or the best mirrored pair if the ends have no room.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         case .cutout:

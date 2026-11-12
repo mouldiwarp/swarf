@@ -47,6 +47,7 @@ var layFlat = false
 var pngPath: String? = nil
 var pngPaths = true
 var keepOuts: [Region] = []
+var flipDepth: Double? = nil
 var vSettings = VCarveSettings()
 var i = 0
 while i < args.count {
@@ -89,7 +90,7 @@ while i < args.count {
         job.flipSettings.enabled = true
         if i + 1 < args.count, let d = Double(args[i + 1]) {
             guard d.isFinite, d >= 0 else { usage("--flip takes a spoilboard depth in mm, 0 or more") }
-            job.flipSettings.spoilboardDepth = d
+            flipDepth = d
             i += 1
         }
     case "--margin":
@@ -154,6 +155,9 @@ do {
         job.operations = JobTemplates.fullProcessing(probe, library: library, material: material)
     }
     job.regions = keepOuts
+    if let d = flipDepth {
+        for k in job.operations.indices where job.operations[k].kind == .dowelHoles { job.operations[k].dowelSettings.spoilboardDepth = d }
+    }
     let ctx = CAMContext(raw: mesh, job: job)
     let s = ctx.placed.stockSize
     print(String(format: "Stock %.1f x %.1f x %.1f mm, grid %d x %d @ %.3f mm", s.x, s.y, s.z, ctx.heights.width, ctx.heights.height, ctx.res))

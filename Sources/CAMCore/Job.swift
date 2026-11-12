@@ -135,6 +135,12 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     }
     /// nil = every enabled region applies.
     public var regionIDs: [UUID]? = nil
+    // Dowel holes (two-sided jobs)
+    public var dowel: DowelSettings? = nil
+    public var dowelSettings: DowelSettings {
+        get { dowel ?? DowelSettings() }
+        set { dowel = newValue }
+    }
     /// Which face this operation machines in a two-sided job. nil = side A. Optional so older projects still open.
     public var side: MachiningSide? = nil
     public var machiningSide: MachiningSide {
@@ -176,6 +182,7 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
         case .dowelHoles:
             boundary = .stock
             drilling = DrillSettings()
+            dowel = DowelSettings()
             cutting.stepdown = max(0.5, min(cutting.stepdown, tool.diameter * 0.5))
         }
     }

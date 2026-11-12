@@ -150,12 +150,11 @@ struct ViewportOverlay: View {
             HStack(alignment: .top) {
                 viewControls
                 Spacer()
-                if model.mode != .orbit { modeHint }
-                Spacer()
                 legend
             }
-            HStack {
+            HStack(alignment: .top) {
                 toolPalette
+                if model.mode != .orbit { modeHint }
                 Spacer()
             }
             Spacer()
@@ -169,6 +168,7 @@ struct ViewportOverlay: View {
             ForEach(ViewPreset.allCases) { v in
                 Button(v.label) { model.requestView(v) }
                     .buttonStyle(.borderless)
+                    .fixedSize()
                     .padding(.horizontal, 6).padding(.vertical, 3)
             }
             Divider().frame(height: 16)
@@ -183,6 +183,7 @@ struct ViewportOverlay: View {
                 .menuStyle(.borderlessButton)
                 .frame(width: 34)
         }
+        .fixedSize()
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(.regularMaterial, in: Capsule())
     }
@@ -203,7 +204,8 @@ struct ViewportOverlay: View {
                 }
                 .buttonStyle(.plain)
                 .help(m.label)
-                .disabled(model.placed == nil || (m == .placeTab && model.selectedOperation?.kind != .cutout))
+                .disabled(model.placed == nil || (m == .placeTab && model.selectedOperation?.kind != .cutout)
+                          || (m == .placeDowel && (model.job.activeFlip == nil || model.dowelOperation == nil)))
             }
         }
         .padding(4)
@@ -217,17 +219,18 @@ struct ViewportOverlay: View {
             case .faceDown: return "Click a face to lay it flat on the bed"
             case .drawKeepOut: return "Drag a rectangle over features that must not be milled"
             case .placeTab: return model.selectedOperation?.kind == .cutout ? "Click along the cutout path to add tabs" : "Select a Cutout operation first"
+            case .placeDowel: return "Click in the waste to add a mirrored dowel pair; click a hole to remove it"
             case .orbit: return ""
             }
         }()
         return HStack(spacing: 8) {
             Image(systemName: model.mode.symbol)
-            Text(text)
+            Text(text).lineLimit(3).frame(maxWidth: 380, alignment: .leading)
             Button("Done") { model.mode = .orbit; model.highlightTriangles = [] }
                 .buttonStyle(.borderedProminent).controlSize(.small)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(.regularMaterial, in: Capsule())
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
     var legend: some View {

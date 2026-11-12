@@ -240,7 +240,7 @@ open build/Swarf.app</pre>
     Swarf machines them in four steps. The stock is located by two dowels, so the X/Y zero never changes.</p>
   <ol class="steps">
     <li><b>Dowel holes.</b> With the stock clamped down, two 6 mm holes are pecked through the stock and 5 mm into the spoilboard.
-      They sit on the stock's centre line (front to back), one in the waste beyond each end of the part.</li>
+      They come in pairs mirrored across the stock's centre line (front to back), so each hole lands on a dowel again after the flip.</li>
     <li><b>Side A (the top).</b> The top is machined and the part cut out with tabs, as in a one-sided job.</li>
     <li><b>Flip.</b> Lift the stock, push 6 mm dowels into the spoilboard holes, roll the stock over front-to-back (about the X axis; the
       ends stay where they are) and drop it onto the dowels. Clamp it. Keep the X/Y zero and re-probe Z on the new top.</li>
@@ -249,10 +249,9 @@ open build/Swarf.app</pre>
   <h3>Setting it up</h3>
   <ul>
     <li>Turn on <b>Machine both sides (flip)</b> under <b>Stock &amp; Work Zero</b>. A <b>Dowel holes</b> operation is added at the top of the list.</li>
-    <li>The stock needs room at both ends: about 25 mm between the part and each stock end on the centre line with a 6 mm cutter.
-      Increase the <b>XY margin</b> or the stock size if Swarf says there is no room.</li>
-    <li><b>Dowel holes into spoilboard</b> (5 mm by default) and <b>Dowel clearance from part</b> set the hole depth and how far the holes stay from the cutout.
-      The holes are as deep as the stock plus the spoilboard depth. Swarf refuses holes deeper than the cutter's flute length, so the collet can't reach the stock;
+    <li>Select the <b>Dowel holes</b> operation to set where the holes go (see <i>Placing the dowel holes</i> below).</li>
+    <li>In the Dowel holes inspector, <b>Into spoilboard</b> (5 mm by default) and <b>Clearance from part</b> set the hole depth and how far the holes stay
+      from the cutout. The holes are as deep as the stock plus the spoilboard depth. Swarf refuses holes deeper than the cutter's flute length, so the collet can't reach the stock;
       with a 50 mm cutter, 45 mm stock is about the limit.</li>
     <li>Set an operation's <b>Side</b> to <b>B</b> in its inspector, or right-click it and choose <b>Move to Side B</b>. Pockets, 3D roughing and finishing,
       and drilling can run on side B. Cutouts, facing and V-carving can't: the part is already cut out from side A.</li>
@@ -260,6 +259,20 @@ open build/Swarf.app</pre>
       flat-floored cavities, or roughing and finishing for a carved back.</li>
     <li>The sidebar lists the operations under <b>Dowel holes</b>, <b>Side A</b> and <b>Side B</b>, in the order they run.</li>
   </ul>
+  <h3>Placing the dowel holes</h3>
+  <p>By default the placement is <b>Automatic</b>. Swarf puts one hole on the centre line in the waste beyond each end of the part. If
+    the part fills the stock length, it puts a mirrored pair where the gap between the part and the stock edge is widest, such as either side of a guitar
+    body's waist. If neither fits, it says there is no room: increase the <b>XY margin</b> or the stock size, or place the holes yourself.</p>
+  <p>To place them yourself, select the Dowel holes operation and click <b>Place by Clicking</b> (or the ◎ button in the viewport tool palette).
+    The view switches to Top. Hover over the stock to preview a hole and its mirror on the other side of the centre line:</p>
+  <ul>
+    <li><b>Green</b>: both holes are clear of the part (by the cutout slot plus the clearance) and of the stock edge. Click to add the pair.</li>
+    <li><b>Red</b>: one of the holes lands on or too close to the part or the edge. Clicking shows why and adds nothing.</li>
+    <li>Click an existing hole to remove its pair. <b>Use Automatic</b> clears your holes. Press <b>Done</b> or Esc to stop placing.</li>
+  </ul>
+  <p>The inspector lists every hole with its X/Y position (from the stock's front-left corner). Two holes, one pair, are enough; add a
+    second pair for more support on a large part. If a later change (a bigger cutter, a new orientation) moves the part onto a hole, the hole turns red and
+    the operation reports an error until you move it.</p>
   <h3>What side B leaves alone</h3>
   <p>The part hangs in the stock by the tabs from side A's cutout. Side B never cuts the frame of stock around the part (it holds the dowels and the clamps),
     and never cuts where the tabs are. Keep-out boxes are drawn on the side-A view and apply to side B in the same place on the part, over their full depth.</p>

@@ -364,7 +364,7 @@ struct SetupSheet: View {
             if flip {
                 Text("Two-sided job").font(.headline).padding(.top, 8)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "1. Clamp the stock. Drill the dowel holes (%.1f mm into the spoilboard).", model.job.flipSettings.spoilboardDepth))
+                    Text(String(format: "1. Clamp the stock. Drill the dowel holes (%.1f mm into the spoilboard).", model.dowelOperation?.dowelSettings.spoilboardDepth ?? 5))
                     Text("2. Machine side A (top) and cut the part out. It stays held by tabs.")
                     Text("3. Lift the stock, push dowels into the spoilboard holes, roll the stock over front-to-back onto them. Clamp it.")
                     Text("4. Keep the X/Y zero, re-probe Z on the new top, and machine side B (back).")

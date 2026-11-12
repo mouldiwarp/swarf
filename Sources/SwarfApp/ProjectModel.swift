@@ -2,6 +2,7 @@ import CAMCore
 import Combine
 import Foundation
 import SwiftUI
+import simd
 
 enum SidebarItem: Hashable {
     case model, stock, machine
@@ -10,7 +11,7 @@ enum SidebarItem: Hashable {
 }
 
 enum InteractionMode: String, CaseIterable, Identifiable {
-    case orbit, faceUp, faceDown, drawKeepOut, placeTab
+    case orbit, faceUp, faceDown, drawKeepOut, placeTab, placeDowel
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -19,6 +20,7 @@ enum InteractionMode: String, CaseIterable, Identifiable {
         case .faceDown: return "Pick Bottom Face"
         case .drawKeepOut: return "Draw Keep-out"
         case .placeTab: return "Place Tabs"
+        case .placeDowel: return "Place Dowel Holes"
         }
     }
     var symbol: String {
@@ -28,6 +30,7 @@ enum InteractionMode: String, CaseIterable, Identifiable {
         case .faceDown: return "arrow.down.square"
         case .drawKeepOut: return "rectangle.dashed.badge.record"
         case .placeTab: return "pin"
+        case .placeDowel: return "circle.circle"
         }
     }
 }
@@ -160,7 +163,8 @@ final class ProjectModel: ObservableObject {
     /// Developer hooks used for automated screenshots: -SwarfAutoProcess YES, -SwarfAutoSimulate YES, -SwarfAutoExport YES,
     /// -SwarfAutoOps vcarve,cutout (add these operations instead of the full-processing template),
     /// -SwarfSelectOp N (1-based), -SwarfView top|iso|front|right, -SwarfKeepOut x0,y0,x1,y1 (adds and selects a keep-out box),
-    /// -SwarfMargin mm (stock XY margin), -SwarfFlip YES (two-sided job).
+    /// -SwarfMargin mm (stock XY margin), -SwarfFlip YES (two-sided job), -SwarfDowelPicks x,y;x,y (hand-placed dowel
+    /// holes, stock space), -SwarfDowelHover x,y with -SwarfMode placeDowel (shows the placement preview there).
     private func runAutomationHooks() {
         let d = UserDefaults.standard
         if document.mesh != nil, let v = d.string(forKey: "SwarfView"), let preset = ViewPreset(rawValue: v) {
@@ -179,6 +183,21 @@ final class ProjectModel: ObservableObject {
             for k in list.split(separator: ",").compactMap({ OperationKind(rawValue: String($0)) }) { addOperation(k) }
         } else {
             addFullProcessing()
+        }
+        if let s = d.string(forKey: "SwarfDowelPicks") {
+            let picks = s.split(separator: ";").compactMap { item -> V2? in
+                let v = item.split(separator: ",").compactMap { Double($0) }
+                return v.count == 2 ? V2(v[0], v[1]) : nil
+            }
+            updateJob("Place Dowel Holes") { j in
+                for k in j.operations.indices where j.operations[k].kind == .dowelHoles { j.operations[k].dowelSettings.picks = picks }
+            }
+        }
+        if let m = d.string(forKey: "SwarfMode").flatMap(InteractionMode.init(rawValue:)) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.mode = m }
+        }
+        if let h = d.string(forKey: "SwarfDowelHover")?.split(separator: ",").compactMap({ Double($0) }), h.count == 2 {
+            dowelHover = V2(h[0], h[1])
         }
         let ops = document.job.operations
         let n = d.integer(forKey: "SwarfSelectOp")
@@ -395,8 +414,8 @@ final class ProjectModel: ObservableObject {
             if on { Self.sortByStage(&j.operations) }
         }
         if on, let ctx = context, ctx.job.stock == job.stock {
-            if let d = job.operations.first(where: { $0.kind == .dowelHoles }), (try? ctx.dowelPositions(toolDiameter: d.tool.diameter)) == nil {
-                showNotice("The stock has no room for dowel holes beyond the ends of the part. Increase the XY margin or the stock length.")
+            if let d = job.operations.first(where: { $0.kind == .dowelHoles }), (try? ctx.dowelPositions(d)) == nil {
+                showNotice("The stock has no room for automatic dowel holes. Place them by hand (select Dowel holes, then click in the waste), or increase the XY margin.")
             }
         }
     }
@@ -504,6 +523,60 @@ final class ProjectModel: ObservableObject {
             guard let i = j.operations.firstIndex(where: { $0.id == id }), j.operations[i].kind == .cutout else { return }
             j.operations[i].tabs.manualPositions.append(p)
             j.operations[i].tabs.enabled = true
+        }
+    }
+
+    // MARK: Dowel holes
+
+    /// Where the mouse is while placing dowel holes (stock space), for the green/red preview.
+    @Published var dowelHover: V2? = nil
+
+    var dowelOperation: CAMCore.Operation? {
+        if let op = selectedOperation, op.kind == .dowelHoles { return op }
+        return job.operations.first { $0.kind == .dowelHoles }
+    }
+
+    /// The hole at `p` and its mirror, each with the reason it can't be drilled (nil = fine).
+    func dowelPreview(at p: V2) -> [(V2, String?)] {
+        guard let ctx = context, let op = dowelOperation, job.activeFlip != nil else { return [] }
+        return ctx.dowelHoles(picks: [p]).map { ($0, ctx.dowelProblem(at: $0, op: op, cutouts: job.operations)) }
+    }
+
+    /// Holes to mark in the 3D view: the placed ones (red if unusable), or the automatic ones.
+    func dowelMarkers() -> [(V2, Bool)] {
+        guard let ctx = context, let op = dowelOperation, job.activeFlip != nil, op.enabled else { return [] }
+        let picks = op.dowelSettings.picks
+        if !picks.isEmpty {
+            return ctx.dowelHoles(picks: picks).map { ($0, ctx.dowelProblem(at: $0, op: op, cutouts: job.operations) == nil) }
+        }
+        return ((try? ctx.dowelPositions(op)) ?? []).map { ($0, true) }
+    }
+
+    /// A click while placing dowel holes: on an existing hole it removes that pair, elsewhere it adds a pair if
+    /// both holes clear the part and the stock edges.
+    func clickDowel(at p: V2) {
+        guard let ctx = context, let op = dowelOperation else { return }
+        let picks = op.dowelSettings.picks
+        if let i = picks.firstIndex(where: { q in ctx.dowelHoles(picks: [q]).contains { simd_distance($0, p) < max(4, op.tool.diameter) } }) {
+            updateJob("Remove Dowel Holes") { j in
+                if let k = j.operations.firstIndex(where: { $0.id == op.id }) { j.operations[k].dowelSettings.picks.remove(at: i) }
+            }
+            return
+        }
+        let bad = dowelPreview(at: p).compactMap { h, why in why.map { String(format: "X%.0f Y%.0f is %@", h.x, h.y, $0) } }
+        if !bad.isEmpty {
+            showNotice("Can't put a dowel hole there: " + bad.joined(separator: "; ") + ".")
+            return
+        }
+        updateJob("Place Dowel Holes") { j in
+            if let k = j.operations.firstIndex(where: { $0.id == op.id }) { j.operations[k].dowelSettings.picks.append(p) }
+        }
+    }
+
+    func clearDowelPicks() {
+        guard let op = dowelOperation else { return }
+        updateJob("Automatic Dowel Holes") { j in
+            if let k = j.operations.firstIndex(where: { $0.id == op.id }) { j.operations[k].dowelSettings.picks = [] }
         }
     }
 

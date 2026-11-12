@@ -16,8 +16,6 @@ Two-sided (flip) machining is in: dowel holes, side A, a roll about X, then side
   apply to side B over their full depth (`protectBelowZ` is dropped). Consider separate side-B keep-outs.
 - **Necks.** Necks are thick (often over 45 mm with the headstock), so the dowel depth limit bites. Consider dowels
   that go only partway through the stock, or a shorter spoilboard depth.
-- **Manual dowel positions.** The positions are automatic only (Y centre line, centred in the gap at each end).
-  A part that fills the stock length needs placement by hand.
 - **Facing on side B.** It isn't offered (the user doesn't want it), but a blank thicker than the part relies on
   side-B pocketing or roughing to bring the back down.
 
