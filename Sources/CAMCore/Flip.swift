@@ -126,9 +126,7 @@ extension CAMContext {
         var tabs: [(V2, Double)] = []
         let W = placed.stockSize.y
         for c in cutouts {
-            let fin = c.cutoutFinishSettings
-            let allowance = fin.enabled ? max(0, fin.allowance) : 0
-            outer = max(outer, c.tool.diameter + max(0, c.stockToLeaveXY) + allowance + 0.5)
+            outer = max(outer, c.cutoutSlotWidth + 0.5)
             guard c.tabs.enabled else { continue }
             let anchors = tabAnchors(c, finishLoops: cutoutLoops(c))
             let flank = c.tabs.shape == .triangular ? c.tabs.height : 0
@@ -163,10 +161,7 @@ extension CAMContext {
 
     /// Clearances a dowel hole needs: from the part's outline, and from the stock edges.
     func dowelNeeds(_ op: Operation, cutouts: [Operation]) -> (fromPart: Double, fromEdge: Double) {
-        let slot = sideACutouts(cutouts).map { c -> Double in
-            let fin = c.cutoutFinishSettings
-            return c.tool.diameter + max(0, c.stockToLeaveXY) + (fin.enabled ? max(0, fin.allowance) : 0)
-        }.max() ?? 6.5
+        let slot = sideACutouts(cutouts).map(\.cutoutSlotWidth).max() ?? 6.5
         let r = op.tool.diameter / 2
         return (r + slot + max(0, op.dowelSettings.clearance), r + 2)
     }

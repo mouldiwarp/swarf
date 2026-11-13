@@ -46,6 +46,17 @@ Rest machining is in (`Rest.swift`): a smaller tool cuts only what a larger one 
 - **Reference by operation, not tool.** A rest pass follows a tool and uses its own area and depth. Following the
   earlier operation's actual settings (or its simulated stock) would remove the need to keep them matched.
 
+## Cutout trench
+
+The wide trench is in (`cutout` in Operations.swift, `CutoutTrench` in Job.swift). Loose ends:
+
+- **Cut one on the WorkBee** and see whether chips really clear better, and whether a deeper stepdown is then safe.
+- **Trench only where it's deep.** Chips clear by themselves in the first few millimetres; the outer pass could start
+  part-way down and save much of the extra time.
+- **Faster second pass.** The pass next to the part only cuts half the cutter's width, so it could run at a higher feed.
+- **Outer pass beyond the stock.** With a small stock margin the outer pass cuts air along the edge. It's harmless but
+  wastes time; it could be clipped to the stock.
+
 ## App
 
 - **Check that the export file name is remembered.** Typing a name and the live rename were checked in the

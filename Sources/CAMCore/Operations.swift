@@ -757,13 +757,39 @@ extension CAMContext {
         let finishZ = op.tool.passLevels(top: zTop, bottom: zBot, stepdown: op.finishStepdown)
         let anchors = tabAnchors(op, finishLoops: finishLoops)
 
-        // Holes before outer profiles (parts stay held longest); within each, roughing before finishing.
-        var jobs: [(loop: Loop, levels: [Double], snap: Double)] = []
+        // With a trench, each roughing loop gets passes further out from the part (outermost first), matched to it by
+        // distance: the offset loops of a hole that's too small for the trench vanish, and that hole is cut as a plain slot.
         let roughLoops = finishing ? cutoutLoops(op, extra: allowance).sorted(by: holesFirst) : finishLoops
+        let base = finishing ? allowance : 0
+        let trenchExtra = op.trenchExtra
+        var outer = [[(loop: Loop, offset: Double)]](repeating: [], count: roughLoops.count)
+        if trenchExtra > 1e-6 {
+            let n = max(1, Int(ceil(trenchExtra / (0.75 * op.tool.diameter) - 1e-9)))
+            let paths = roughLoops.map(ClosedPath.init)
+            for k in stride(from: n, through: 1, by: -1) {
+                let off = trenchExtra * Double(k) / Double(n)
+                for o in cutoutLoops(op, extra: base + off) {
+                    guard let p = o.points.min(by: { ($0.y, $0.x) < ($1.y, $1.x) }) else { continue }
+                    var best = -1, bestD = Double.infinity
+                    for (i, l) in roughLoops.enumerated() where (l.signedArea > 0) == (o.signedArea > 0) {
+                        let d = paths[i].point(at: paths[i].param(nearest: p)).dist(p)
+                        if d < bestD { bestD = d; best = i }
+                    }
+                    if best >= 0 && abs(bestD - off) < 0.5 + 2 * res { outer[best].append((o, off)) }
+                }
+            }
+        }
+        let noRoom = trenchExtra > 1e-6 ? outer.filter(\.isEmpty).count : 0
+
+        // Holes before outer profiles (parts stay held longest); within each, roughing before finishing.
+        var jobs: [(passes: [(loop: Loop, snap: Double)], levels: [Double])] = []
         for hole in [true, false] {
-            for l in roughLoops where (l.signedArea > 0) == hole { jobs.append((l, roughZ, finishing ? allowance + 1 : max(10, op.tool.radius * 4))) }
+            for (i, l) in roughLoops.enumerated() where (l.signedArea > 0) == hole {
+                let own = (l, finishing ? allowance + 1 : max(10, op.tool.radius * 4))
+                jobs.append((outer[i].map { ($0.loop, base + $0.offset + 1) } + [own], roughZ))
+            }
             if finishing {
-                for l in finishLoops where (l.signedArea > 0) == hole { jobs.append((l, finishZ, 1)) }
+                for l in finishLoops where (l.signedArea > 0) == hole { jobs.append(([(l, 1)], finishZ)) }
             }
         }
 
@@ -772,21 +798,28 @@ extension CAMContext {
         let tabs = op.tabs
         let tabTop = tabs.height
         var warned = false
-        for (li, job) in jobs.enumerated() {
-            try Task.checkCancellation()
-            var loop = job.loop
-            if op.direction == .conventional { loop = loop.reversed() }
-            loop = loop.starting(near: b.pos.xy)
-            let path = ClosedPath(loop)
+
+        /// A pass loop with its tabs: the lowest Z allowed at each arc length, and where that changes.
+        struct Tabbed { let path: ClosedPath; let P: Double; let breaks: [Double]; let tabZ: (Double) -> Double }
+        func tabbed(_ l: Loop, snap: Double) -> Tabbed {
+            let path = ClosedPath(l)
             let P = path.perimeter
             var centres: [Double] = []
             for a in anchors {
                 let s = path.param(nearest: a)
-                if path.point(at: s).dist(a) < job.snap + 1e-6 { centres.append(s) }
+                if path.point(at: s).dist(a) < snap + 1e-6 { centres.append(s) }
             }
             let half = tabs.width / 2 + R
             let flank = tabs.shape == .triangular ? tabs.height : 0
-            func tabZ(_ s: Double) -> Double {
+            var breaks: [Double] = []
+            for c in centres {
+                for o in [-half - flank, -half, half, half + flank] {
+                    var s = (c + o).truncatingRemainder(dividingBy: P)
+                    if s < 0 { s += P }
+                    breaks.append(s)
+                }
+            }
+            return Tabbed(path: path, P: P, breaks: breaks) { s in
                 var z = -Double.infinity
                 let u = s.truncatingRemainder(dividingBy: P)
                 for c in centres {
@@ -796,32 +829,62 @@ extension CAMContext {
                 }
                 return z
             }
-            var breaks: [Double] = []
-            for c in centres {
-                for o in [-half - flank, -half, half, half + flank] {
-                    var s = (c + o).truncatingRemainder(dividingBy: P)
-                    if s < 0 { s += P }
-                    breaks.append(s)
-                }
-            }
-            if !regions(for: op).isEmpty && !warned && loop.points.contains(where: { isForbiddenXY($0, z: zBot, op: op, inflate: R) }) {
+        }
+
+        for (li, job) in jobs.enumerated() {
+            try Task.checkCancellation()
+            let loops = job.passes.map { p -> (Loop, Double) in (op.direction == .conventional ? p.loop.reversed() : p.loop, p.snap) }
+            if !regions(for: op).isEmpty && !warned && loops.contains(where: { l in l.0.points.contains { isForbiddenXY($0, z: zBot, op: op, inflate: R) } }) {
                 warned = true
             }
-            var cursor = 0.0
-            var zPrev = zTop
-            b.travel(to: V3(loop.points[0], zTop), approachZ: zTop + 1)
-            for z in job.levels {
-                let dz = zPrev - z
-                let rampLen = min(P, dz / tan(ramp))
-                for (s, p) in path.samples(from: cursor, to: cursor + rampLen, breaks: breaks).dropFirst() {
-                    let zr = zPrev - dz * min(1, (s - cursor) / max(rampLen, 1e-9))
-                    b.cut(V3(p, max(zr, tabZ(s))))
+            if loops.count == 1 {
+                // One pass: ramp down continuously, lap after lap.
+                let loop = loops[0].0.starting(near: b.pos.xy)
+                let t = tabbed(loop, snap: loops[0].1)
+                var cursor = 0.0
+                var zPrev = zTop
+                b.travel(to: V3(loop.points[0], zTop), approachZ: zTop + 1)
+                for z in job.levels {
+                    let dz = zPrev - z
+                    let rampLen = min(t.P, dz / tan(ramp))
+                    for (s, p) in t.path.samples(from: cursor, to: cursor + rampLen, breaks: t.breaks).dropFirst() {
+                        let zr = zPrev - dz * min(1, (s - cursor) / max(rampLen, 1e-9))
+                        b.cut(V3(p, max(zr, t.tabZ(s))))
+                    }
+                    for (s, p) in t.path.samples(from: cursor + rampLen, to: cursor + rampLen + t.P, breaks: t.breaks).dropFirst() {
+                        b.cut(V3(p, max(z, t.tabZ(s))))
+                    }
+                    cursor += rampLen + t.P
+                    zPrev = z
                 }
-                for (s, p) in path.samples(from: cursor + rampLen, to: cursor + rampLen + P, breaks: breaks).dropFirst() {
-                    b.cut(V3(p, max(z, tabZ(s))))
+            } else {
+                // Trench: at each level, the outer passes and then the one at the part. Between passes the tool stays
+                // down, crossing at the last level that is cleared all the way across (raised over any tab).
+                let ts = loops.map { tabbed($0.0, snap: $0.1) }
+                let first = ts[0].path.point(at: ts[0].path.param(nearest: b.pos.xy))
+                b.travel(to: V3(first, zTop), approachZ: zTop + 1)
+                var cleared = zTop
+                for z in job.levels {
+                    for t in ts {
+                        let s0 = t.path.param(nearest: b.pos.xy)
+                        let p0 = t.path.point(at: s0)
+                        let h = max(cleared, t.tabZ(s0))
+                        let over = max(h, b.pos.z)
+                        if b.pos.z < over { b.cut(V3(b.pos.xy, over)) }
+                        if b.pos.xy.dist(p0) > 1e-6 { b.cut(V3(p0, over)) }
+                        if over > h { b.cut(V3(p0, h)) }
+                        let dz = h - z
+                        let rampLen = min(t.P, max(0, dz) / tan(ramp))
+                        for (s, p) in t.path.samples(from: s0, to: s0 + rampLen, breaks: t.breaks).dropFirst() {
+                            let zr = h - dz * min(1, (s - s0) / max(rampLen, 1e-9))
+                            b.cut(V3(p, max(zr, t.tabZ(s))))
+                        }
+                        for (s, p) in t.path.samples(from: s0 + rampLen, to: s0 + rampLen + t.P, breaks: t.breaks).dropFirst() {
+                            b.cut(V3(p, max(z, t.tabZ(s))))
+                        }
+                    }
+                    cleared = z
                 }
-                cursor += rampLen + P
-                zPrev = z
             }
             b.retract()
             progress?(Double(li + 1) / Double(jobs.count))
@@ -829,6 +892,10 @@ extension CAMContext {
         var tp = makeToolpath(op, b)
         tp.moves = simplifyLinear(tp.moves)
         if warned { tp.warnings.append("Cutout passes through a keep-out region; keep-outs are not applied to cutouts.") }
+        if noRoom > 0 {
+            tp.warnings.append(noRoom == 1 ? "One outline has no room for the trench (a small hole, or too near the stock edge); it is cut as a plain slot."
+                               : "\(noRoom) outlines have no room for the trench (small holes, or too near the stock edge); they are cut as plain slots.")
+        }
         return tp
     }
 

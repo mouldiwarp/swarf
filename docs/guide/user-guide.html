@@ -231,6 +231,17 @@ open build/Swarf.app</pre>
     A <b>finishing pass</b> then follows the true outline and removes that last 0.5 mm skin at a much deeper <b>Finish depth of cut</b>,
     4× the roughing stepdown by default. With a 2 mm stepdown, the finishing pass takes 8 mm per pass. Because it only removes 0.5 mm sideways, the load stays light and the edge
     comes out clean. If you change the finish depth, a <b>4×</b> button puts it back to the default.</p>
+  <h3>Wide trench for chip clearance</h3>
+  <p>Off by default. In a deep cut the slot is only as wide as the cutter, so chips pack in, get cut again and heat the bit.
+    Tick <b>Wide trench</b> (Chip clearance) and every roughing level is cut twice: first a pass further out from the part,
+    then the normal pass next to it. The slot becomes <b>Trench width</b> × the tool diameter (1.5× by default: 9 mm for a 6 mm bit)
+    and chips have room to clear. The tool stays down between the two passes, and the finishing pass is unchanged.</p>
+  <ul>
+    <li>Roughing takes nearly twice as long (35 → 63 minutes on a guitar body with a 6 mm bit), so keep it for deep or chip-prone cuts.</li>
+    <li>The stock needs that much more room around the part. Side B and dowel holes allow for the wider slot.</li>
+    <li>Holes too small for the trench, and outlines too near the stock edge, get a plain slot; the operation's warnings say how many.</li>
+    <li>Tabs cross the whole width of the trench.</li>
+  </ul>
   <h3>Holding tabs</h3>
   <ul>
     <li><b>Tabs per loop</b> places tabs automatically and moves them onto straight sections where possible. Or click <b>Place tabs by clicking</b> and click on the outline.</li>
@@ -382,7 +393,8 @@ open build/Swarf.app</pre>
     <code>--ops</code> (facing, pocket, roughing, parallelFinish, waterlineFinish, vcarve, drill, cutout), <code>--keepout x0,y0,x1,y1</code>,
     <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>, <code>--margin</code>,
     <code>--flip [mm]</code> (two-sided job; prefix side-B operations with <code>b:</code>, e.g. <code>--ops dowelHoles,pocket,cutout,b:pocket</code>),
-    <code>--rest &lt;mm&gt;</code> (a rest pass with the flat bit closest to that size after each pocket and 3D roughing).</p>
+    <code>--rest &lt;mm&gt;</code> (a rest pass with the flat bit closest to that size after each pocket and 3D roughing),
+    <code>--trench &lt;x&gt;</code> (cutouts rough a slot <i>x</i> × the tool diameter wide).</p>
 
   <h2 style="margin-top:16pt">19 · Keyboard shortcuts</h2>
   <table>

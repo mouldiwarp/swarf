@@ -29,6 +29,7 @@ func usage(_ reason: String? = nil) -> Never {
                             about X, side B. With --ops, prefix side-B operations with b:, e.g. b:pocket
       --rest <mm>           after each pocket and 3D roughing, add a rest pass with the starter flat end mill
                             closest to <mm> that cuts only what the larger tool couldn't reach
+      --trench <x>          cutouts rough a slot <x> times the tool diameter wide (e.g. 1.5) so chips clear
       --test-cut [c,p,d]    test-cut mode: cutouts c mm deep, pockets and carving p mm, holes d mm
                             (default 8,4,4 for 9 mm MDF); output files are marked _TEST
     """)
@@ -61,6 +62,7 @@ if path.hasSuffix(".swarf") {
 var outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 var opsList: [(OperationKind, MachiningSide)]? = nil
 var restDiameter: Double? = nil
+var trenchFactor: Double? = nil
 var simulate = false
 var layFlat = false
 var pngPath: String? = nil
@@ -132,6 +134,9 @@ while i < args.count {
     case "--vcarve-depth":
         guard let d = Double(next()), d.isFinite, d >= 0 else { usage("--vcarve-depth needs a depth in mm, 0 or more") }
         vSettings.maxDepth = d
+    case "--trench":
+        guard let f = Double(next()), f.isFinite, CutoutTrench.widthRange.contains(f) else { usage("--trench needs a width of 1.1 to 3 times the tool diameter") }
+        trenchFactor = f
     case "--rest":
         guard let d = Double(next()), d.isFinite, d > 0 else { usage("--rest needs a tool diameter in mm") }
         restDiameter = d
@@ -181,6 +186,12 @@ do {
     if !projectJob || !keepOuts.isEmpty { job.regions = keepOuts }
     if let d = flipDepth {
         for k in job.operations.indices where job.operations[k].kind == .dowelHoles { job.operations[k].dowelSettings.spoilboardDepth = d }
+    }
+    if let f = trenchFactor {
+        for k in job.operations.indices where job.operations[k].kind == .cutout {
+            job.operations[k].cutoutTrenchSettings.enabled = true
+            job.operations[k].cutoutTrenchSettings.widthFactor = f
+        }
     }
     if let d = restDiameter, let small = library.closest(kind: .flat, diameter: d) {
         var ops: [CAMCore.Operation] = []

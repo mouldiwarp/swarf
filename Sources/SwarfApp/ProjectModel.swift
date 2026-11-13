@@ -744,6 +744,7 @@ final class ProjectModel: ObservableObject {
         // Only what decides the slot and the tabs: feeds and names don't matter to side B.
         return j.operations.filter { $0.enabled && $0.kind == .cutout && $0.machiningSide == .a }.map { c in
             [(try? enc.encode(c.tool)) ?? Data(), (try? enc.encode(c.tabs)) ?? Data(), (try? enc.encode(c.cutoutFinish)) ?? Data(),
+             (try? enc.encode(c.cutoutTrench)) ?? Data(),
              Data("\(c.stockToLeaveXY)|\(c.cutHoles)|\(c.direction)".utf8)].map { String(decoding: $0, as: UTF8.self) }.joined(separator: "|")
         }.joined(separator: "#")
     }

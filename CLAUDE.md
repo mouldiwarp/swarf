@@ -80,7 +80,8 @@ Three targets share one engine:
    Side B uses its own `CAMContext` (`makeSideB`/`sideB`), built from `PlacedModel.rolledAboutX()`: (x, y, z) →
    (x, W − y, T − z), so side-B toolpaths are in the machine's coordinates after the flip. `FrameProtection` keeps
    side B off the stock frame and side A's tabs. Side-A cutout settings therefore feed side B's cache key
-   (`ProjectModel.cutoutsKey`). `.dowelHoles` drills pairs mirrored across the Y centre line: hand-placed `DowelSettings.picks` (validated by
+   (`ProjectModel.cutoutsKey`). The slot a cutout leaves (cutter, allowance, optional wide trench) is
+   `Operation.cutoutSlotWidth`; the frame and dowel clearances use it. `.dowelHoles` drills pairs mirrored across the Y centre line: hand-placed `DowelSettings.picks` (validated by
    `dowelProblem`) or automatic (`dowelPositions`). `Toolpath.rolledAboutX` maps side B back
    for display and simulation, and `PostProcessor.process` writes one file set per `FlipStage`.
 8. `StockSimulator` (Simulation.swift) removes material from a stock height field and compares it with the

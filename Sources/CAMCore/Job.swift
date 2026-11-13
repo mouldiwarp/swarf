@@ -76,6 +76,16 @@ public struct CutoutFinish: Codable, Sendable, Equatable, Hashable {
     public init() {}
 }
 
+/// Cutout trench: each roughing level first cuts further out from the part, then at the part, so the slot is wider than
+/// the cutter and chips have room to clear. The finishing pass is unchanged.
+public struct CutoutTrench: Codable, Sendable, Equatable, Hashable {
+    public var enabled = false
+    /// Slot width as a multiple of the tool diameter.
+    public var widthFactor = 1.5
+    public static let widthRange: ClosedRange<Double> = 1.1...3
+    public init() {}
+}
+
 public struct TabSettings: Codable, Sendable, Equatable, Hashable {
     public var enabled = true
     public var countPerLoop = 4
@@ -123,6 +133,24 @@ public struct Operation: Codable, Sendable, Identifiable, Equatable {
     public var cutoutFinishSettings: CutoutFinish {
         get { cutoutFinish ?? CutoutFinish() }
         set { cutoutFinish = newValue }
+    }
+    /// Wider roughing slot for cutouts (optional so older projects still open).
+    public var cutoutTrench: CutoutTrench? = nil
+    public var cutoutTrenchSettings: CutoutTrench {
+        get { cutoutTrench ?? CutoutTrench() }
+        set { cutoutTrench = newValue }
+    }
+    /// How much wider than the cutter the trench makes the roughing slot (mm); 0 when it is off.
+    public var trenchExtra: Double {
+        let t = cutoutTrenchSettings
+        guard kind == .cutout, t.enabled, t.widthFactor.isFinite else { return 0 }
+        let f = min(CutoutTrench.widthRange.upperBound, max(1, t.widthFactor))
+        return (f - 1) * tool.diameter
+    }
+    /// Width of the slot a cutout leaves around the part, measured from the finished wall (mm).
+    public var cutoutSlotWidth: Double {
+        let fin = cutoutFinishSettings
+        return tool.diameter + max(0, stockToLeaveXY) + (fin.enabled ? max(0, fin.allowance) : 0) + trenchExtra
     }
     /// Finishing depth of cut for cutouts: explicit, or 4× the roughing stepdown.
     public var finishStepdown: Double {

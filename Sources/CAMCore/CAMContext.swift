@@ -85,7 +85,7 @@ public final class CAMContext: @unchecked Sendable {
         self.side = side
         self.protection = protection
         let s = placed.stockSize
-        let maxTool = job.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY }
+        let maxTool = job.operations.map { $0.tool.radius + max(0, $0.boundaryMargin) + $0.stockToLeaveXY + $0.trenchExtra }
             .filter(\.isFinite).max() ?? 5
         let reach = min(CAMContext.maxGridMargin, max(8, maxTool + 4))
         let res = CAMContext.gridResolution(stockSize: s, quality: job.quality, margin: reach)

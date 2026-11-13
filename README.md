@@ -107,7 +107,7 @@ The [user guide](docs/Swarf-User-Guide.pdf) covers each step in detail.
 | 3D Finish – Waterline | Constant-Z contours, optionally only on steep walls |
 | V-Carve | Engraves text and logos with a V-bit. Corners stay sharp and the depth follows the stroke width. Optional flat-bottom depth limit |
 | Drill (Peck) | Finds round holes that match the tool diameter and pecks them, with a full retract to clear chips or a short chip-break lift. Blind holes stop at their floor; through holes go below the stock. Output is plain G0/G1, so it runs on any firmware |
-| Cutout (Profile) | Cuts the part free, internal holes first, with **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes off the last skin at a deeper cut (4× the roughing stepdown by default) for a clean edge |
+| Cutout (Profile) | Cuts the part free, internal holes first, with **holding tabs**. Roughing passes stay 0.5 mm off the part, then a finishing pass takes off the last skin at a deeper cut (4× the roughing stepdown by default) for a clean edge. An optional **wide trench** roughs each level twice, outer pass first, so the slot is 1.5× the cutter and chips clear |
 | Dowel Holes (Flip) | Two-sided jobs: registration holes through the stock and 5 mm into the spoilboard, in pairs mirrored across the stock's centre line. Placed automatically (beyond each end of the part, or either side of a waist) or by clicking, with a green/red preview |
 
 In a two-sided job, pockets, 3D roughing and finishing, and drilling can also be set to machine **side B**
@@ -179,6 +179,7 @@ Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
 `--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`,
 `--rest <mm>` (add a rest pass with the flat bit closest to that size after each pocket and 3D roughing),
+`--trench <x>` (cutouts rough a slot x × the tool diameter wide so chips clear),
 `--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`), `--margin <mm>`,
 `--flip [spoilboard mm]` (two-sided job; with `--ops`, prefix side-B operations with `b:`, e.g.
 `--ops dowelHoles,pocket,cutout,b:pocket`).
