@@ -53,7 +53,8 @@ The wide trench is in (`cutout` in Operations.swift, `CutoutTrench` in Job.swift
 - **Cut one on the WorkBee** and see whether chips really clear better, and whether a deeper stepdown is then safe.
 - **Trench only where it's deep: not possible.** To cut the outer pass at depth, the cutter needs the whole trench
   above it cleared, so the outer pass has to start at the top. Time savings have to come from elsewhere.
-- **Faster second pass.** The pass next to the part only cuts half the cutter's width, so it could run at a higher feed.
+- **Second-pass feed on the machine.** It runs at 1.25× by default (63 → 58 min on a guitar body). Find out how
+  far it can really go on the WorkBee.
 - **Outer pass beyond the stock.** With a small stock margin the outer pass cuts air along the edge. It's harmless but
   wastes time; it could be clipped to the stock.
 

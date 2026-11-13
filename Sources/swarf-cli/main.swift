@@ -30,6 +30,7 @@ func usage(_ reason: String? = nil) -> Never {
       --rest <mm>           after each pocket and 3D roughing, add a rest pass with the starter flat end mill
                             closest to <mm> that cuts only what the larger tool couldn't reach
       --trench <x>          cutouts rough a slot <x> times the tool diameter wide (e.g. 1.5) so chips clear
+      --trench-feed <x>     feed of the trench's second pass, the one next to the part, as a multiple (default 1.25)
       --test-cut [c,p,d]    test-cut mode: cutouts c mm deep, pockets and carving p mm, holes d mm
                             (default 8,4,4 for 9 mm MDF); output files are marked _TEST
     """)
@@ -63,6 +64,7 @@ var outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 var opsList: [(OperationKind, MachiningSide)]? = nil
 var restDiameter: Double? = nil
 var trenchFactor: Double? = nil
+var trenchFeed: Double? = nil
 var simulate = false
 var layFlat = false
 var pngPath: String? = nil
@@ -137,6 +139,9 @@ while i < args.count {
     case "--trench":
         guard let f = Double(next()), f.isFinite, CutoutTrench.widthRange.contains(f) else { usage("--trench needs a width of 1.1 to 3 times the tool diameter") }
         trenchFactor = f
+    case "--trench-feed":
+        guard let f = Double(next()), f.isFinite, CutoutTrench.innerFeedRange.contains(f) else { usage("--trench-feed needs a multiple from 1 to 2") }
+        trenchFeed = f
     case "--rest":
         guard let d = Double(next()), d.isFinite, d > 0 else { usage("--rest needs a tool diameter in mm") }
         restDiameter = d
@@ -191,6 +196,7 @@ do {
         for k in job.operations.indices where job.operations[k].kind == .cutout {
             job.operations[k].cutoutTrenchSettings.enabled = true
             job.operations[k].cutoutTrenchSettings.widthFactor = f
+            if let x = trenchFeed { job.operations[k].cutoutTrenchSettings.innerFeed = x }
         }
     }
     if let d = restDiameter, let small = library.closest(kind: .flat, diameter: d) {

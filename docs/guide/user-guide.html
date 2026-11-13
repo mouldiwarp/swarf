@@ -237,7 +237,10 @@ open build/Swarf.app</pre>
     then the normal pass next to it. The slot becomes <b>Trench width</b> × the tool diameter (1.5× by default: 9 mm for a 6 mm bit)
     and chips have room to clear. The tool stays down between the two passes, and the finishing pass is unchanged.</p>
   <ul>
-    <li>Roughing takes nearly twice as long (35 → 63 minutes on a guitar body with a 6 mm bit), so keep it for deep or chip-prone cuts.</li>
+    <li><b>Second pass feed</b>: the pass next to the part only cuts part of the bit's width, so it runs faster than the
+      outer pass, 1.25× the feed by default. Set it to 1 to keep one feed throughout.</li>
+    <li>Roughing still takes much longer: on a guitar body with a 6 mm bit, 35 minutes without the trench, 58 with it
+      (63 if the second pass isn't faster). Keep it for deep or chip-prone cuts.</li>
     <li>The stock needs that much more room around the part. Side B and dowel holes allow for the wider slot.</li>
     <li>Holes too small for the trench, and outlines too near the stock edge, get a plain slot; the operation's warnings say how many.</li>
     <li>Tabs cross the whole width of the trench.</li>
@@ -394,7 +397,8 @@ open build/Swarf.app</pre>
     <code>--vcarve-source recesses|silhouette</code>, <code>--vcarve-depth</code>, <code>--margin</code>,
     <code>--flip [mm]</code> (two-sided job; prefix side-B operations with <code>b:</code>, e.g. <code>--ops dowelHoles,pocket,cutout,b:pocket</code>),
     <code>--rest &lt;mm&gt;</code> (a rest pass with the flat bit closest to that size after each pocket and 3D roughing),
-    <code>--trench &lt;x&gt;</code> (cutouts rough a slot <i>x</i> × the tool diameter wide).</p>
+    <code>--trench &lt;x&gt;</code> (cutouts rough a slot <i>x</i> × the tool diameter wide),
+    <code>--trench-feed &lt;x&gt;</code> (feed of its second pass, default 1.25×).</p>
 
   <h2 style="margin-top:16pt">19 · Keyboard shortcuts</h2>
   <table>

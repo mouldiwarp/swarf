@@ -683,8 +683,11 @@ struct OperationInspector: View {
                 if op.cutoutTrenchSettings.enabled {
                     NumberField(title: "Trench width", value: b(\.cutoutTrenchSettings.widthFactor), unit: "× tool", step: 0.1,
                                 range: CutoutTrench.widthRange, digits: 2)
-                    Text(String(format: "Each roughing level is cut twice: first %.1f mm further out, then next to the part, so the slot is %.1f mm wide instead of %.1f mm and chips can clear. Roughing takes about twice as long, and the stock needs this much room around the part.",
-                                op.trenchExtra, op.tool.diameter + op.trenchExtra, op.tool.diameter))
+                    NumberField(title: "Second pass feed", value: b(\.cutoutTrenchSettings.innerFeedFactor), unit: "× feed", step: 0.05,
+                                range: CutoutTrench.innerFeedRange, digits: 2)
+                    Text(String(format: "Each roughing level is cut twice: first %.1f mm further out, then next to the part, so the slot is %.1f mm wide instead of %.1f mm and chips can clear. The second pass only cuts part of the bit's width, so it runs at %.0f mm/min. Roughing still takes much longer, and the stock needs this much room around the part.",
+                                op.trenchExtra, op.tool.diameter + op.trenchExtra, op.tool.diameter,
+                                op.cutting.feed * op.cutoutTrenchSettings.innerFeedFactor))
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }

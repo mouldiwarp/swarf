@@ -859,13 +859,16 @@ extension CAMContext {
                 }
             } else {
                 // Trench: at each level, the outer passes and then the one at the part. Between passes the tool stays
-                // down, crossing at the last level that is cleared all the way across (raised over any tab).
+                // down, crossing at the last level that is cleared all the way across (raised over any tab). The pass at
+                // the part cuts only part of the cutter's width, so it runs at the trench's faster feed.
                 let ts = loops.map { tabbed($0.0, snap: $0.1) }
+                let innerFeed = op.cutting.feed * op.cutoutTrenchSettings.innerFeedFactor
                 let first = ts[0].path.point(at: ts[0].path.param(nearest: b.pos.xy))
                 b.travel(to: V3(first, zTop), approachZ: zTop + 1)
                 var cleared = zTop
                 for z in job.levels {
-                    for t in ts {
+                    for (k, t) in ts.enumerated() {
+                        let f: Double? = k == ts.count - 1 ? innerFeed : nil
                         let s0 = t.path.param(nearest: b.pos.xy)
                         let p0 = t.path.point(at: s0)
                         let h = max(cleared, t.tabZ(s0))
@@ -877,10 +880,10 @@ extension CAMContext {
                         let rampLen = min(t.P, max(0, dz) / tan(ramp))
                         for (s, p) in t.path.samples(from: s0, to: s0 + rampLen, breaks: t.breaks).dropFirst() {
                             let zr = h - dz * min(1, (s - s0) / max(rampLen, 1e-9))
-                            b.cut(V3(p, max(zr, t.tabZ(s))))
+                            b.cut(V3(p, max(zr, t.tabZ(s))), feed: f)
                         }
                         for (s, p) in t.path.samples(from: s0 + rampLen, to: s0 + rampLen + t.P, breaks: t.breaks).dropFirst() {
-                            b.cut(V3(p, max(z, t.tabZ(s))))
+                            b.cut(V3(p, max(z, t.tabZ(s))), feed: f)
                         }
                     }
                     cleared = z

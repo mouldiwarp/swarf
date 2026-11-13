@@ -101,6 +101,37 @@ import Testing
         }
     }
 
+    /// The pass next to the part runs faster (1.25× by default); the outer pass and the finishing pass don't.
+    @Test func secondPassRunsFaster() throws {
+        let op = trenchOp()
+        let ctx = context(op)
+        let tp = try ctx.generate(op)
+        let R = op.tool.radius, F = op.cutting.feed
+        var seen = Set<String>()
+        var prev = tp.start
+        for m in tp.moves {
+            defer { prev = m.to }
+            // Moves along a pass, not the short crossings between passes (which run at the normal feed).
+            guard m.kind == .feed, m.to.z < op.tabs.height - 0.1 else { continue }
+            let d = Double(ctx.silhouetteDistance.sample(m.to.xy))
+            guard abs(Double(ctx.silhouetteDistance.sample(prev.xy)) - d) < 0.2 else { continue }
+            if abs(d - (R + 0.5)) < 0.2 { #expect(abs(m.feed - F * 1.25) < 1e-6); seen.insert("inner") }
+            else if abs(d - (R + 3.5)) < 0.2 { #expect(abs(m.feed - F) < 1e-6); seen.insert("outer") }
+            else if abs(d - R) < 0.2 { #expect(abs(m.feed - F) < 1e-6); seen.insert("finish") }
+        }
+        #expect(seen == ["inner", "outer", "finish"])
+        var same = op
+        same.cutoutTrenchSettings.innerFeedFactor = 1
+        let slow = try ctx.generate(same)
+        #expect(slow.moves.allSatisfy { $0.kind != .feed || abs($0.feed - F) < 1e-6 })
+        let t = { (x: Toolpath) in x.stats(rapidRate: 5000, acceleration: 500).seconds }
+        #expect(t(tp) < t(slow))
+        // Out-of-range values are clamped; old trench settings without it get the default.
+        same.cutoutTrenchSettings.innerFeed = 9
+        #expect(same.cutoutTrenchSettings.innerFeedFactor == 2)
+        #expect(CutoutTrench().innerFeedFactor == 1.25)
+    }
+
     /// A hole too small for the trench is cut as a plain slot, and the warning says so.
     @Test func smallHoleFallsBackToAPlainSlot() throws {
         let walls: [(V2, V2)] = [(V2(0, 0), V2(50, 19)), (V2(0, 31), V2(50, 50)), (V2(0, 19), V2(19, 31)), (V2(31, 19), V2(50, 31))]

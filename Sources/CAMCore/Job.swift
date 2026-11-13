@@ -83,6 +83,19 @@ public struct CutoutTrench: Codable, Sendable, Equatable, Hashable {
     /// Slot width as a multiple of the tool diameter.
     public var widthFactor = 1.5
     public static let widthRange: ClosedRange<Double> = 1.1...3
+    /// Feed of the pass next to the part as a multiple of the operation's feed. It only cuts part of the cutter's
+    /// width, so it can go faster than the full-width outer pass. nil = `defaultInnerFeed`.
+    public var innerFeed: Double? = nil
+    public static let defaultInnerFeed = 1.25
+    public static let innerFeedRange: ClosedRange<Double> = 1...2
+    /// The second-pass feed multiple, clamped to `innerFeedRange`.
+    public var innerFeedFactor: Double {
+        get {
+            let f = innerFeed ?? Self.defaultInnerFeed
+            return f.isFinite ? min(Self.innerFeedRange.upperBound, max(Self.innerFeedRange.lowerBound, f)) : 1
+        }
+        set { innerFeed = newValue }
+    }
     public init() {}
 }
 

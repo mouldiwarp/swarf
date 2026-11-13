@@ -179,7 +179,8 @@ Options: `--machine <id>`, `--material <id>`, `--quality draft|normal|fine`, `--
 `--rotate x:90`, `--ops facing,pocket,roughing,parallelFinish,waterlineFinish,vcarve,drill,cutout`,
 `--keepout x0,y0,x1,y1`, `--vcarve-source recesses|silhouette`, `--vcarve-depth <mm>`,
 `--rest <mm>` (add a rest pass with the flat bit closest to that size after each pocket and 3D roughing),
-`--trench <x>` (cutouts rough a slot x × the tool diameter wide so chips clear),
+`--trench <x>` (cutouts rough a slot x × the tool diameter wide so chips clear), `--trench-feed <x>` (its second
+pass's feed multiple, default 1.25),
 `--test-cut [cutout,pocket,drill]` (depths in mm, default `8,4,4`), `--margin <mm>`,
 `--flip [spoilboard mm]` (two-sided job; with `--ops`, prefix side-B operations with `b:`, e.g.
 `--ops dowelHoles,pocket,cutout,b:pocket`).
