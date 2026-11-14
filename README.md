@@ -146,6 +146,7 @@ its own feeds.
 | **Ooznest WorkBee Z1+ (Duet / RRF)** (default) | `;` comments, `G4 S` dwell, arcs, one file per tool |
 | Generic Duet / RepRapFirmware | Single file with an `M291` tool-change prompt |
 | Generic GRBL 1.1 | |
+| FoxAlien XE-Pro Ultra (GRBL, 1.5 kW VFD spindle) | `()` comments, 5 s spin-up, 6000-24000 rpm, one file per tool for the offline controller |
 | Carbide 3D Shapeoko / Nomad | `M6` for Carbide Motion and BitSetter |
 | Sienci LongMill / AltMill | `M6` handled by gSender |
 | Inventables X-Carve | |

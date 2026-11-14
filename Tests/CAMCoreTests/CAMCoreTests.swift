@@ -767,6 +767,12 @@ import simd
         return Toolpath(id: UUID(), name: "Test", kind: .cutout, tool: tool, rpm: 18000, start: V3(0, 0, 15), moves: moves)
     }
 
+    @Test func foxalienProfileIsGRBLWithVFDSpinUp() {
+        let p = MachineProfile.find("foxalien-xe-pro-ultra")
+        #expect(p.id == "foxalien-xe-pro-ultra" && p.commentStyle == .parentheses && p.splitFilesPerTool)
+        #expect(p.spindleOn == "M3 S{rpm}" && p.spindleDwell >= 5 && p.maxRPM == 24000)
+    }
+
     @Test func workbeeRRFDialect() {
         let post = PostProcessor(profile: .workbeeRRF, origin: V3(0, 0, 10), safeZ: 15, jobName: "Job", stockSize: V3(50, 50, 10))
         let files = post.process([simpleToolpath()])

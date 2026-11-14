@@ -69,6 +69,16 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         header: ["G90 G94 G17 G21", "G54"], footer: ["G0 Z{safeZ}", "G0 X0 Y0", "M2"],
         envelope: V3(800, 800, 100), maxFeed: 5000, rapidRate: 5000, acceleration: 400, minRPM: 0, maxRPM: 24000)
 
+    /// FoxAlien XE-Pro Ultra (800 x 800, GRBL) with the 1.5 kW air-cooled VFD spindle, via USB or the offline controller.
+    /// Feeds and travel are conservative starting points; edit a copy of the profile to match the machine's settings.
+    public static let foxalienXEProUltra = MachineProfile(
+        id: "foxalien-xe-pro-ultra", name: "FoxAlien XE-Pro Ultra (GRBL, 1.5 kW VFD spindle)", controller: "GRBL 1.1",
+        fileExtension: "nc", commentStyle: .parentheses, toolChange: .none, splitFilesPerTool: true,
+        spindleDwell: 5, dwellSyntax: .pSeconds,
+        header: ["G90 G94 G17 G21", "G54"], footer: ["G0 Z{safeZ}", "G0 X0 Y0", "M5", "M2"],
+        envelope: V3(800, 800, 100), maxFeed: 6000, rapidRate: 6000, acceleration: 800, minRPM: 6000, maxRPM: 24000,
+        notes: "One file per tool (the offline controller has no tool changer). 5 s spin-up for the VFD spindle; S is rpm, 6000-24000.")
+
     public static let shapeoko = MachineProfile(
         id: "carbide-shapeoko", name: "Carbide 3D Shapeoko / Nomad (Carbide Motion)", controller: "GRBL (Carbide Motion)",
         fileExtension: "nc", commentStyle: .parentheses, toolChange: .m6, splitFilesPerTool: false,
@@ -150,7 +160,7 @@ public struct MachineProfile: Codable, Sendable, Identifiable, Hashable {
         g0NeedsFeed: true, notes: "Marlin G0 moves use the last feed, so rapids carry an explicit F.")
 
     public static let builtIn: [MachineProfile] = [
-        workbeeRRF, duetGeneric, grbl, shapeoko, longmill, xcarve, genmitsu, onefinity, grblHAL, masso, linuxcnc, mach3,
+        workbeeRRF, duetGeneric, grbl, foxalienXEProUltra, shapeoko, longmill, xcarve, genmitsu, onefinity, grblHAL, masso, linuxcnc, mach3,
         uccnc, marlin,
     ]
 
