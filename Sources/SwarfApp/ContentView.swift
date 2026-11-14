@@ -127,7 +127,7 @@ struct EmptyStateView: View {
                 .font(.system(size: 64, weight: .thin))
                 .foregroundStyle(.secondary)
             Text("Drop an STL here").font(.title2.weight(.semibold))
-            Text("Swarf turns 3D models into G-code for your CNC.\nDefault output is tailored to the Ooznest WorkBee Z1+.")
+            Text("Swarf turns 3D models into G-code for your CNC.\nWorks with GRBL, Duet, Mach3 and more.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             HStack {

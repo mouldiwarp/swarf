@@ -72,7 +72,7 @@
     <li><span>13</span>Keep-out regions</li>
     <li><span>14</span>Simulation and checks</li>
     <li><span>15</span>Exporting G-code</li>
-    <li><span>16</span>Running the job on a WorkBee</li>
+    <li><span>16</span>Running the job</li>
     <li><span>17</span>Troubleshooting</li>
     <li><span>18</span>Command line</li>
     <li><span>19</span>Keyboard shortcuts</li>
@@ -145,8 +145,8 @@ open build/Swarf.app</pre>
   </ul>
 
   <h2 style="margin-top:16pt">6 · Choosing your machine</h2>
-  <p>Select <b>Machine &amp; Output</b> to pick the post-processor. The default is the <b>Ooznest WorkBee Z1+ (Duet / RRF)</b>. Profiles are also
-    included for generic RepRapFirmware, GRBL 1.1, the FoxAlien XE-Pro Ultra (1.5 kW VFD spindle, USB or offline controller), Carbide 3D Shapeoko / Nomad, Sienci LongMill / AltMill, X-Carve, Genmitsu,
+  <p>Select <b>Machine &amp; Output</b> to pick the post-processor. Profiles are included for generic GRBL 1.1 (the usual starting point for any GRBL machine),
+    generic RepRapFirmware, the Ooznest WorkBee Z1+, the FoxAlien XE-Pro Ultra (1.5 kW VFD spindle, USB or offline controller), Carbide 3D Shapeoko / Nomad, Sienci LongMill / AltMill, X-Carve, Genmitsu,
     Onefinity, grblHAL / FluidNC, MASSO G3, LinuxCNC, Mach3 / Mach4, UCCNC and Marlin. Each profile knows the machine's work
     envelope, maximum feeds and spindle range, and Swarf warns you if a job won't fit.</p>
   <p>You can set the default machine, material and resolution for new projects in <b>Swarf ▸ Settings ▸ General</b>.</p>
@@ -354,20 +354,20 @@ open build/Swarf.app</pre>
 
 <section class="chapter">
   <h2>15 · Exporting G-code</h2>
-  <figure class="w85"><img src="../screenshot-export.png" alt="Export sheet"><figcaption>The export sheet, with a preview of the WorkBee G-code.</figcaption></figure>
+  <figure class="w85"><img src="../screenshot-export.png" alt="Export sheet"><figcaption>The export sheet, with a preview of the G-code.</figcaption></figure>
   <ol class="steps">
     <li>Click <b>Export G-code</b> (⌘E). Check the machine, the list of files, the stock size, the zero point and the run time.</li>
     <li>Read the preview. The header lists the stock, the work zero, each tool and the run time.</li>
     <li>Type a name in <b>File name</b> if you don't want the model's name. The file list shows the result, and the project remembers the name for next time. Click <b>Export…</b> and choose a folder. <b>Setup Sheet (PDF)…</b> saves a printable sheet with the stock, the zero point, a top view and the tool list. <b>Copy G-code</b> puts the program on the clipboard. Tick <b>Show G-code</b> to see the first 400 lines of the selected file; it is off by default, and Swarf remembers your choice.</li>
   </ol>
-  <p>For the WorkBee, Swarf writes <b>one file per tool</b>, numbered in the order they run. Other machines get a single file with tool-change commands where the controller supports them.</p>
+  <p>Machines without a tool changer (GRBL and Duet profiles by default) get <b>one file per tool</b>, numbered in the order they run. Other machines get a single file with tool-change commands where the controller supports them.</p>
 
-  <h2 style="margin-top:16pt">16 · Running the job on a WorkBee</h2>
+  <h2 style="margin-top:16pt">16 · Running the job</h2>
   <ol class="steps">
     <li>Fix the stock down, keeping clamps outside the toolpaths (or covered by keep-outs).</li>
     <li>Fit the first tool. Jog to the <b>work zero shown in the setup sheet</b> (by default the centre of the stock's left edge) and set X and Y zero.</li>
     <li>Probe or touch off Z on the <b>top of the stock</b>.</li>
-    <li>Upload the first file in the Duet web interface. For the first run, raise Z zero 10–20 mm and air-cut the start of the job.</li>
+    <li>Load the first file in your sender or controller (a GRBL sender, offline controller, or the Duet web interface). For the first run, raise Z zero 10–20 mm and air-cut the start of the job.</li>
     <li>Run the file. Stay at the machine with your hand near the emergency stop.</li>
     <li>For each further file: change the bit, re-probe Z (keep X and Y), and run it.</li>
   </ol>

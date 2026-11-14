@@ -1,8 +1,8 @@
 # Swarf
 
-**Free, open-source, Mac-native CAM for hobby CNC.** Swarf turns an STL into G-code. Its default
-output is tailored to the **Ooznest WorkBee Z1+ (Duet / RepRapFirmware)**, and it includes
-post-processors for most popular hobby machines.
+**Free, open-source, Mac-native CAM for hobby CNC.** Swarf turns an STL into G-code. It writes
+G-code for GRBL machines (including grblHAL and FluidNC), Duet / RepRapFirmware, Mach3 / 4, LinuxCNC and
+more, with a post-processor for each popular hobby machine.
 
 ![A guitar body with pocket, drilling and cutout toolpaths](docs/screenshot-toolpaths.png)
 
@@ -81,11 +81,11 @@ swift test -c release
 1. **Import STL** (⇧⌘I), or drop the file on the window.
 2. **Model & Orientation**: make sure the face you want to machine points up.
 3. **Stock & Work Zero**: check the stock size, the material and where you'll zero the machine.
-4. **Machine & Output**: choose your machine. The WorkBee Z1+ (RRF) is the default.
+4. **Machine & Output**: choose your machine or controller. Any GRBL machine can start from the generic GRBL profile.
 5. **Operations**: click **Full Processing**, or **+** to add operations yourself. Select an
    operation to edit its tool, feeds and settings in the inspector on the right.
 6. **Simulate** (⌘R): check for red gouges, blue leftover stock and keep-out warnings.
-7. **Export G-code** (⌘E). For the WorkBee you get one file per tool. Zero XY on the corner shown,
+7. **Export G-code** (⌘E). Machines without a tool changer get one file per tool. Zero XY on the corner shown,
    and probe Z before each file.
 8. **Air-cut** above the stock, then cut in scrap before cutting good material.
 
@@ -159,7 +159,7 @@ its own feeds.
 | UCCNC | |
 | Marlin (MPCNC / LowRider) | |
 
-Arc fitting (G2/G3) keeps files small and motion smooth. Profiles other than the WorkBee are
+Arc fitting (G2/G3) keeps files small and motion smooth. Profiles are
 best-effort. Check the header, spindle and tool-change commands against your controller before your
 first cut.
 
